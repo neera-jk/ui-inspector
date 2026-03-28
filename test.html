@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>UI Inspector Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 40px;
+        }
+
+        .card {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            max-width: 400px;
+        }
+
+        .card h2 {
+            margin-top: 0;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 8px;
+        }
+
+        .btn-primary {
+            background: #3b82f6;
+            color: white;
+        }
+
+        .btn-danger {
+            background: #ef4444;
+            color: white;
+        }
+
+        .nav {
+            display: flex;
+            gap: 16px;
+            padding: 12px 20px;
+            background: #f3f4f6;
+            margin-bottom: 24px;
+            border-radius: 4px;
+        }
+
+        .nav a {
+            text-decoration: none;
+            color: #374151;
+        }
+
+        input[type="text"] {
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            width: 100%;
+            margin-bottom: 12px;
+        }
+    </style>
+</head>
+
+<body>
+    <nav class="nav">
+        <a href="#">Home</a>
+        <a href="#">About</a>
+        <a href="#">Settings</a>
+    </nav>
+
+    <h1>Test Page</h1>
+    <p>Open the browser console and run <code>window.inspectUI()</code> to start inspecting.</p>
+
+    <div class="card" data-component="UserCard">
+        <h2>User Profile</h2>
+        <p>Name: Neeraj</p>
+        <p>Role: QA Engineer</p>
+        <button class="btn btn-primary">Edit Profile</button>
+        <button class="btn btn-danger">Delete</button>
+    </div>
+
+    <div class="card" data-component="SearchBox">
+        <h2>Search</h2>
+        <input type="text" placeholder="Search something...">
+        <button class="btn btn-primary">Go</button>
+    </div>
+
+    <div class="card" data-component="NotificationPanel">
+        <h2>Notifications</h2>
+        <ul>
+            <li>New message from admin</li>
+            <li>Build failed on staging</li>
+            <li>PR #42 approved</li>
+        </ul>
+    </div>
+
+    <script src="./inspector.js?v=2"></script>
+    <script>
+        if (typeof setupUIInspector === 'function') {
+            setupUIInspector();
+        } else {
+            console.error('[inspector] script failed to load - setupUIInspector not found');
+        }
+    </script>
+</body>
+
+</html>

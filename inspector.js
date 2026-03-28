@@ -4,7 +4,7 @@
  * Click any element to log a QA issue against it.
  */
 
-export function setupUIInspector() {
+function setupUIInspector() {
     var isInspectMode = false;
     var issueList = [];
 
