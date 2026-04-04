@@ -1,0 +1,170 @@
+/* Highlight outline applied to hovered elements during inspect mode */
+.ui-inspector-highlight {
+    outline: 2px solid #ef4444 !important;
+    outline-offset: 2px !important;
+    cursor: crosshair !important;
+}
+
+/* ── Modal styles scoped under .ui-inspector-modal ── */
+
+.ui-inspector-modal {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    z-index: 2147483647 !important;
+    background: rgba(0, 0, 0, 0.5) !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-family: Inter, system-ui, -apple-system, sans-serif !important;
+}
+
+.ui-inspector-modal * {
+    box-sizing: border-box !important;
+}
+
+.ui-inspector-modal .ui-inspector-card {
+    background: #fff !important;
+    max-width: 480px !important;
+    width: 90% !important;
+    border-radius: 12px !important;
+    padding: 24px !important;
+    position: relative !important;
+    z-index: 2147483647 !important;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3) !important;
+}
+
+.ui-inspector-modal .ui-inspector-header {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    margin-bottom: 16px !important;
+}
+
+.ui-inspector-modal .ui-inspector-header h2 {
+    margin: 0 !important;
+    font-size: 18px !important;
+    font-weight: 700 !important;
+    color: #111 !important;
+}
+
+.ui-inspector-modal .ui-inspector-close-btn {
+    background: none !important;
+    border: none !important;
+    font-size: 20px !important;
+    cursor: pointer !important;
+    color: #666 !important;
+    padding: 4px 8px !important;
+    line-height: 1 !important;
+}
+
+.ui-inspector-modal .ui-inspector-close-btn:hover {
+    color: #111 !important;
+}
+
+.ui-inspector-modal .ui-inspector-info {
+    background: #f9fafb !important;
+    border: 1px solid #e5e7eb !important;
+    border-radius: 8px !important;
+    padding: 12px !important;
+    margin-bottom: 16px !important;
+    font-size: 13px !important;
+    color: #444 !important;
+    line-height: 1.5 !important;
+}
+
+.ui-inspector-modal .ui-inspector-info span {
+    display: block !important;
+}
+
+.ui-inspector-modal .ui-inspector-label {
+    display: block !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    color: #333 !important;
+    margin-bottom: 6px !important;
+}
+
+.ui-inspector-modal .ui-inspector-textarea {
+    width: 100% !important;
+    min-height: 60px !important;
+    border: 1px solid #e5e7eb !important;
+    border-radius: 8px !important;
+    padding: 10px !important;
+    font-size: 14px !important;
+    font-family: Inter, system-ui, -apple-system, sans-serif !important;
+    resize: vertical !important;
+    margin-bottom: 16px !important;
+    color: #111 !important;
+    background: #fff !important;
+}
+
+.ui-inspector-modal .ui-inspector-textarea:focus {
+    outline: 2px solid #3b82f6 !important;
+    border-color: #3b82f6 !important;
+}
+
+.ui-inspector-modal .ui-inspector-severity-row {
+    display: flex !important;
+    gap: 8px !important;
+    margin-bottom: 20px !important;
+}
+
+.ui-inspector-modal .ui-inspector-severity-btn {
+    flex: 1 !important;
+    padding: 8px 4px !important;
+    border: 2px solid #e5e7eb !important;
+    border-radius: 8px !important;
+    background: #fff !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    cursor: pointer !important;
+    color: #333 !important;
+    transition: all 0.15s ease !important;
+}
+
+.ui-inspector-modal .ui-inspector-severity-btn:hover {
+    opacity: 0.85 !important;
+}
+
+.ui-inspector-modal .ui-inspector-severity-btn.selected-low {
+    background: #22c55e !important;
+    color: #fff !important;
+    border-color: #22c55e !important;
+}
+
+.ui-inspector-modal .ui-inspector-severity-btn.selected-medium {
+    background: #f59e0b !important;
+    color: #fff !important;
+    border-color: #f59e0b !important;
+}
+
+.ui-inspector-modal .ui-inspector-severity-btn.selected-high {
+    background: #f97316 !important;
+    color: #fff !important;
+    border-color: #f97316 !important;
+}
+
+.ui-inspector-modal .ui-inspector-severity-btn.selected-critical {
+    background: #ef4444 !important;
+    color: #fff !important;
+    border-color: #ef4444 !important;
+}
+
+.ui-inspector-modal .ui-inspector-save-btn {
+    width: 100% !important;
+    padding: 12px !important;
+    background: #3b82f6 !important;
+    color: #fff !important;
+    border: none !important;
+    border-radius: 8px !important;
+    font-size: 15px !important;
+    font-weight: 600 !important;
+    cursor: pointer !important;
+}
+
+.ui-inspector-modal .ui-inspector-save-btn:hover {
+    background: #2563eb !important;
+}

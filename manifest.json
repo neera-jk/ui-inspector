@@ -1,0 +1,28 @@
+{
+    "manifest_version": 3,
+    "name": "UI Inspector",
+    "version": "1.0.0",
+    "description": "A QA annotation tool for frontend developers",
+    "permissions": [
+        "storage",
+        "activeTab",
+        "scripting"
+    ],
+    "content_scripts": [
+        {
+            "matches": [
+                "<all_urls>"
+            ],
+            "js": [
+                "content.js"
+            ],
+            "css": [
+                "content.css"
+            ],
+            "run_at": "document_idle"
+        }
+    ],
+    "action": {
+        "default_popup": "popup.html"
+    }
+}

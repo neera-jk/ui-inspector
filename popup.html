@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=260">
+    <title>UI Inspector</title>
+    <link rel="stylesheet" href="popup.css">
+    <script src="theme-init.js"></script>
+</head>
+
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div class="header-left">
+            <div class="header-icon">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 9v4m0 4h.01M12 3a9 9 0 100 18 9 9 0 000-18z" stroke="#fff" stroke-width="2.5"
+                        stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+            </div>
+            <span class="header-title">UI Inspector</span>
+        </div>
+        <button id="themeToggle" class="theme-toggle" title="Toggle theme">
+            <svg class="icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="5" stroke="var(--icon-stroke)" stroke-width="2" />
+                <path
+                    d="M12 1v2m0 18v2m11-11h-2M3 12H1m16.07-7.07l-1.41 1.41M7.34 16.66l-1.41 1.41m12.14 0l-1.41-1.41M7.34 7.34L5.93 5.93"
+                    stroke="var(--icon-stroke)" stroke-width="2" stroke-linecap="round" />
+            </svg>
+            <svg class="icon-moon" width="13" height="13" viewBox="0 0 24 24" fill="none"
+                xmlns="http://www.w3.org/2000/svg">
+                <path d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z" stroke="var(--icon-stroke)" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+        </button>
+    </div>
+
+    <!-- Status Row -->
+    <div class="status-row">
+        <div class="status-left">
+            <div id="statusDot" class="status-dot"></div>
+            <span id="statusText" class="status-text">Inactive</span>
+        </div>
+        <span id="issueBadge" class="issue-badge">0 issues</span>
+    </div>
+
+    <!-- CTA -->
+    <div class="cta-wrap">
+        <button id="ctaBtn" class="cta-btn">Start inspecting</button>
+    </div>
+
+    <!-- Recent Issues -->
+    <div class="recent-section">
+        <div class="recent-label">Recent</div>
+        <ul id="recentList" class="recent-list">
+            <li class="empty-state">No issues yet</li>
+        </ul>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+        <button id="exportBtn" class="footer-btn">Export JSON</button>
+        <button id="clearBtn" class="footer-btn">Clear all</button>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+
+</html>
