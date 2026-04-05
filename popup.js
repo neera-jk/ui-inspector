@@ -1,4 +1,5 @@
-// Sends a message to the content script running in the active tab and returns the response
+// Sends a message to the content script running in the active tab and returns the response.
+// If the content script is not yet injected, injects it and retries once.
 function sendMessageToActiveTab(message) {
     return new Promise((resolve, reject) => {
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -6,9 +7,29 @@ function sendMessageToActiveTab(message) {
                 reject(new Error("No active tab found"));
                 return;
             }
-            chrome.tabs.sendMessage(tabs[0].id, message, (response) => {
+            const tabId = tabs[0].id;
+            chrome.tabs.sendMessage(tabId, message, (response) => {
                 if (chrome.runtime.lastError) {
-                    reject(new Error(chrome.runtime.lastError.message));
+                    const errMsg = chrome.runtime.lastError.message || "";
+                    if (errMsg.includes("Could not establish connection")) {
+                        // Content script not injected — inject it now and retry
+                        Promise.all([
+                            chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] }),
+                            chrome.scripting.insertCSS({ target: { tabId }, files: ["content.css"] }),
+                        ])
+                            .then(() => {
+                                chrome.tabs.sendMessage(tabId, message, (retryResponse) => {
+                                    if (chrome.runtime.lastError) {
+                                        reject(new Error(chrome.runtime.lastError.message));
+                                        return;
+                                    }
+                                    resolve(retryResponse);
+                                });
+                            })
+                            .catch(reject);
+                    } else {
+                        reject(new Error(errMsg));
+                    }
                     return;
                 }
                 resolve(response);
@@ -91,10 +112,11 @@ function downloadJSON(issues) {
 // On popup load, fetch current status and set up handlers
 document.addEventListener("DOMContentLoaded", () => {
     // Apply saved theme to body
-    const savedTheme = localStorage.getItem("ui-inspector-theme");
-    if (savedTheme === "dark") {
-        document.body.setAttribute("data-theme", "dark");
-    }
+    chrome.storage.local.get("ui-inspector-theme", (result) => {
+        if (result["ui-inspector-theme"] === "dark") {
+            document.body.setAttribute("data-theme", "dark");
+        }
+    });
 
     // Theme toggle
     document.getElementById("themeToggle").addEventListener("click", () => {
@@ -103,10 +125,12 @@ document.addEventListener("DOMContentLoaded", () => {
             document.body.removeAttribute("data-theme");
             document.documentElement.removeAttribute("data-theme");
             localStorage.setItem("ui-inspector-theme", "light");
+            chrome.storage.local.set({ "ui-inspector-theme": "light" });
         } else {
             document.body.setAttribute("data-theme", "dark");
             document.documentElement.setAttribute("data-theme", "dark");
             localStorage.setItem("ui-inspector-theme", "dark");
+            chrome.storage.local.set({ "ui-inspector-theme": "dark" });
         }
     });
 

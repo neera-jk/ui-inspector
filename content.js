@@ -176,6 +176,15 @@
         const backdrop = document.createElement("div");
         backdrop.className = "ui-inspector-modal";
 
+        chrome.storage.local.get("ui-inspector-theme", (result) => {
+            if (result["ui-inspector-theme"] === "dark") {
+                backdrop.setAttribute("data-theme", "dark");
+            }
+            _buildAndMountModal(backdrop, elementData);
+        });
+    }
+
+    function _buildAndMountModal(backdrop, elementData) {
         let selectedSeverity = "Medium";
 
         backdrop.innerHTML = `
@@ -195,10 +204,10 @@
         <textarea class="ui-inspector-textarea" id="ui-inspector-how" placeholder="Describe the fix..."></textarea>
         <label class="ui-inspector-label">Severity</label>
         <div class="ui-inspector-severity-row">
-          <button class="ui-inspector-severity-btn" data-severity="Low">Low</button>
-          <button class="ui-inspector-severity-btn selected-medium" data-severity="Medium">Medium</button>
-          <button class="ui-inspector-severity-btn" data-severity="High">High</button>
-          <button class="ui-inspector-severity-btn" data-severity="Critical">Critical</button>
+          <button class="ui-inspector-severity-btn" data-severity="Low"><span>Low</span><span></span></button>
+          <button class="ui-inspector-severity-btn selected-medium" data-severity="Medium"><span>Medium</span><span></span></button>
+          <button class="ui-inspector-severity-btn" data-severity="High"><span>High</span><span></span></button>
+          <button class="ui-inspector-severity-btn" data-severity="Critical"><span>Critical</span><span></span></button>
         </div>
         <button class="ui-inspector-save-btn" data-action="save">Save Issue</button>
       </div>
