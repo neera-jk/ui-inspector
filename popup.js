@@ -45,12 +45,11 @@ function escapeHtml(str) {
 }
 
 // Updates all UI elements based on current state
-function updateUI(isInspectMode, issueCount, issues) {
+function updateUI(isInspectMode, issueCount) {
     const dot = document.getElementById("statusDot");
     const statusText = document.getElementById("statusText");
     const badge = document.getElementById("issueBadge");
     const ctaBtn = document.getElementById("ctaBtn");
-    const recentList = document.getElementById("recentList");
 
     if (isInspectMode) {
         dot.classList.add("active");
@@ -63,37 +62,6 @@ function updateUI(isInspectMode, issueCount, issues) {
     }
 
     badge.textContent = issueCount + " issue" + (issueCount !== 1 ? "s" : "");
-
-    renderRecentIssues(recentList, issues);
-}
-
-function renderRecentIssues(container, issues) {
-    container.innerHTML = "";
-
-    if (!issues || issues.length === 0) {
-        container.innerHTML = '<li class="empty-state">No issues yet</li>';
-        return;
-    }
-
-    const recent = issues.slice(-3).reverse();
-    recent.forEach((issue) => {
-        const li = document.createElement("li");
-        li.className = "recent-item";
-
-        const severityClass = (issue.severity || "medium").toLowerCase();
-        const title = escapeHtml(issue.whatIsWrong || "Untitled");
-        const component = escapeHtml(issue.component || "Unknown");
-        const page = escapeHtml(issue.page || "/");
-
-        li.innerHTML =
-            '<div class="recent-item-top">' +
-            '<span class="severity-badge ' + severityClass + '">' + escapeHtml(severityClass) + '</span>' +
-            '<span class="recent-item-title">' + title + '</span>' +
-            '</div>' +
-            '<div class="recent-item-meta">' + component + ' · ' + page + '</div>';
-
-        container.appendChild(li);
-    });
 }
 
 // Triggers a JSON file download with all issues
@@ -103,6 +71,29 @@ function downloadJSON(issues) {
     const a = document.createElement("a");
     a.href = url;
     a.download = "ui-inspector-export.json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+// Triggers a CSV file download with all issues
+function downloadCSV(issues) {
+    if (!issues || issues.length === 0) return;
+    var headers = ["id", "severity", "whatIsWrong", "howToFix", "component", "page", "element", "timestamp"];
+    var csvRows = [headers.join(",")];
+    issues.forEach(function (issue) {
+        var row = headers.map(function (h) {
+            var val = (issue[h] || "").toString().replace(/"/g, '""');
+            return '"' + val + '"';
+        });
+        csvRows.push(row.join(","));
+    });
+    var blob = new Blob([csvRows.join("\n")], { type: "text/csv" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "ui-inspector-export.csv";
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -138,11 +129,14 @@ document.addEventListener("DOMContentLoaded", () => {
     sendMessageToActiveTab({ type: "GET_STATUS" })
         .then((response) => {
             if (response) {
-                updateUI(response.isInspectMode, response.issueCount, response.issues || []);
+                updateUI(response.isInspectMode, response.issueCount);
+                if (response.isSidebarVisible) {
+                    document.getElementById("panelBtn").textContent = "Hide Panel";
+                }
             }
         })
         .catch(() => {
-            updateUI(false, 0, []);
+            updateUI(false, 0);
         });
 
     // Toggle inspect mode
@@ -150,7 +144,18 @@ document.addEventListener("DOMContentLoaded", () => {
         sendMessageToActiveTab({ type: "TOGGLE_INSPECT" })
             .then((response) => {
                 if (response) {
-                    updateUI(response.isInspectMode, response.issueCount, response.issues || []);
+                    updateUI(response.isInspectMode, response.issueCount);
+                }
+            })
+            .catch(() => { });
+    });
+
+    // Toggle sidebar panel
+    document.getElementById("panelBtn").addEventListener("click", () => {
+        sendMessageToActiveTab({ type: "TOGGLE_SIDEBAR" })
+            .then((response) => {
+                if (response) {
+                    document.getElementById("panelBtn").textContent = response.isSidebarVisible ? "Hide Panel" : "Show Panel";
                 }
             })
             .catch(() => { });
@@ -161,7 +166,7 @@ document.addEventListener("DOMContentLoaded", () => {
         sendMessageToActiveTab({ type: "CLEAR_ISSUES" })
             .then((response) => {
                 if (response) {
-                    updateUI(response.isInspectMode, 0, []);
+                    updateUI(response.isInspectMode, 0);
                 }
             })
             .catch(() => { });

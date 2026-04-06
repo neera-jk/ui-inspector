@@ -4,6 +4,8 @@
     let isInspectMode = false;
     let issueList = [];
     let lastHighlighted = null;
+    let isSidebarVisible = false;
+    let sidebarEl = null;
 
     // Loads any previously saved issues from localStorage, defaulting to an empty array
     function loadIssues() {
@@ -102,6 +104,31 @@
         return parts.join(" > ");
     }
 
+    // Builds a unique CSS selector path from the element up to body
+    function getCssSelector(element) {
+        if (!element || element === document.body || element === document.documentElement) return "";
+        var segments = [];
+        var current = element;
+        var depth = 0;
+        while (current && current !== document.body && current !== document.documentElement && depth < 10) {
+            if (current.id) {
+                segments.push("#" + current.id);
+                break;
+            }
+            var tag = current.tagName.toLowerCase();
+            var firstClass = current.classList && current.classList.length > 0 ? "." + current.classList[0] : "";
+            var nth = "";
+            if (current.parentElement) {
+                var idx = Array.from(current.parentElement.children).indexOf(current) + 1;
+                nth = ":nth-child(" + idx + ")";
+            }
+            segments.push(tag + firstClass + nth);
+            current = current.parentElement;
+            depth++;
+        }
+        return segments.reverse().join(" > ");
+    }
+
     // Handles mouseover during inspect mode: highlights the hovered element and removes highlight from the previous one
     function onMouseOver(e) {
         const target = e.target;
@@ -142,6 +169,7 @@
             page: window.location.pathname,
             hierarchy: getParentHierarchy(element),
             component: componentName,
+            selector: getCssSelector(element),
         };
 
         disableInspectMode();
@@ -197,6 +225,7 @@
           <span><strong>Component:</strong> ${escapeHtml(elementData.component)}</span>
           <span><strong>Page:</strong> ${escapeHtml(elementData.page)}</span>
           <span><strong>Element:</strong> &lt;${escapeHtml(elementData.tagName)}&gt;</span>
+          <span><strong>Selector:</strong> <code style="font-size:11px;word-break:break-all;">${escapeHtml(elementData.selector)}</code></span>
         </div>
         <label class="ui-inspector-label">What is wrong?</label>
         <textarea class="ui-inspector-textarea" id="ui-inspector-what" placeholder="Describe the issue..."></textarea>
@@ -270,6 +299,7 @@
                 id_attr: elementData.id,
                 text: elementData.innerText,
                 hierarchy: elementData.hierarchy,
+                selector: elementData.selector,
                 whatIsWrong: whatValue,
                 howToFix: howValue,
                 severity: selectedSeverity,
@@ -282,10 +312,137 @@
             if (backdrop.parentNode) {
                 backdrop.parentNode.removeChild(backdrop);
             }
+            renderSidebarIssues();
             enableInspectMode();
         });
 
         document.body.appendChild(backdrop);
+    }
+
+    // ── Sidebar ──
+
+    function showSidebar() {
+        if (sidebarEl) return;
+        isSidebarVisible = true;
+        sidebarEl = document.createElement("div");
+        sidebarEl.className = "ui-inspector-sidebar";
+
+        chrome.storage.local.get("ui-inspector-theme", (result) => {
+            if (result["ui-inspector-theme"] === "dark") {
+                sidebarEl.setAttribute("data-theme", "dark");
+            }
+            sidebarEl.innerHTML =
+                '<div class="ui-inspector-sb-header">' +
+                '<span class="ui-inspector-sb-title">UI Inspector</span>' +
+                '<span class="ui-inspector-sb-count" id="ui-inspector-sb-count">' + issueList.length + ' issues</span>' +
+                '<button class="ui-inspector-sb-close" id="ui-inspector-sb-close">\u2715</button>' +
+                '</div>' +
+                '<div class="ui-inspector-sb-body" id="ui-inspector-sb-body"></div>' +
+                '<div class="ui-inspector-sb-footer">' +
+                '<button class="ui-inspector-sb-footer-btn" id="ui-inspector-sb-json">JSON</button>' +
+                '<button class="ui-inspector-sb-footer-btn" id="ui-inspector-sb-csv">CSV</button>' +
+                '<button class="ui-inspector-sb-footer-btn" id="ui-inspector-sb-clear">Clear</button>' +
+                '</div>';
+
+            document.body.appendChild(sidebarEl);
+            renderSidebarIssues();
+
+            sidebarEl.querySelector("#ui-inspector-sb-close").addEventListener("click", hideSidebar);
+
+            sidebarEl.querySelector("#ui-inspector-sb-json").addEventListener("click", function () {
+                downloadFile(JSON.stringify(issueList, null, 2), "ui-inspector-export.json", "application/json");
+            });
+
+            sidebarEl.querySelector("#ui-inspector-sb-csv").addEventListener("click", function () {
+                var headers = ["id", "severity", "whatIsWrong", "howToFix", "component", "page", "element", "timestamp"];
+                var rows = [headers.join(",")];
+                issueList.forEach(function (issue) {
+                    var row = headers.map(function (h) {
+                        var val = (issue[h] || "").toString().replace(/"/g, '""');
+                        return '"' + val + '"';
+                    });
+                    rows.push(row.join(","));
+                });
+                downloadFile(rows.join("\n"), "ui-inspector-export.csv", "text/csv");
+            });
+
+            sidebarEl.querySelector("#ui-inspector-sb-clear").addEventListener("click", function () {
+                clearIssues();
+                renderSidebarIssues();
+            });
+        });
+    }
+
+    function hideSidebar() {
+        isSidebarVisible = false;
+        if (sidebarEl && sidebarEl.parentNode) {
+            sidebarEl.parentNode.removeChild(sidebarEl);
+        }
+        sidebarEl = null;
+    }
+
+    function toggleSidebar() {
+        if (isSidebarVisible) {
+            hideSidebar();
+        } else {
+            showSidebar();
+        }
+    }
+
+    function renderSidebarIssues() {
+        if (!sidebarEl) return;
+        var body = sidebarEl.querySelector("#ui-inspector-sb-body");
+        var countEl = sidebarEl.querySelector("#ui-inspector-sb-count");
+        if (!body) return;
+
+        countEl.textContent = issueList.length + " issue" + (issueList.length !== 1 ? "s" : "");
+
+        if (issueList.length === 0) {
+            body.innerHTML = '<div class="ui-inspector-sb-empty">No issues yet</div>';
+            return;
+        }
+
+        body.innerHTML = "";
+        issueList.slice().reverse().forEach(function (issue) {
+            var card = document.createElement("div");
+            card.className = "ui-inspector-sb-card";
+
+            var sevClass = (issue.severity || "medium").toLowerCase();
+            var ts = issue.timestamp ? new Date(issue.timestamp).toLocaleString() : "";
+
+            card.innerHTML =
+                '<div class="ui-inspector-sb-card-top">' +
+                '<span class="ui-inspector-sb-dot ui-inspector-sb-dot-' + escapeHtml(sevClass) + '"></span>' +
+                '<span class="ui-inspector-sb-card-title">' + escapeHtml(issue.whatIsWrong || "Untitled") + '</span>' +
+                '<span class="ui-inspector-sb-card-chevron">\u203A</span>' +
+                '</div>' +
+                '<div class="ui-inspector-sb-card-meta">' + escapeHtml(issue.component || "Unknown") + ' \u00b7 ' + escapeHtml(issue.page || "/") + '</div>' +
+                '<div class="ui-inspector-sb-card-detail">' +
+                '<div><strong>What:</strong> ' + escapeHtml(issue.whatIsWrong || "") + '</div>' +
+                '<div><strong>Fix:</strong> ' + escapeHtml(issue.howToFix || "") + '</div>' +
+                '<div><strong>Element:</strong> &lt;' + escapeHtml(issue.element || "") + '&gt;</div>' +
+                '<div><strong>Selector:</strong> <code style="font-size:11px;word-break:break-all;">' + escapeHtml(issue.selector || "") + '</code></div>' +
+                '<div><strong>Time:</strong> ' + escapeHtml(ts) + '</div>' +
+                '</div>';
+
+            card.querySelector(".ui-inspector-sb-card-top").addEventListener("click", function () {
+                card.classList.toggle("expanded");
+            });
+
+            body.appendChild(card);
+        });
+    }
+
+    function downloadFile(content, filename, type) {
+        var blob = new Blob([content], { type: type });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
     }
 
     // Escapes HTML special characters to prevent injection when rendering element data in the modal
@@ -324,14 +481,18 @@
             } else {
                 enableInspectMode();
             }
-            sendResponse({ isInspectMode, issueCount: issueList.length, issues: issueList });
+            sendResponse({ isInspectMode, issueCount: issueList.length, issues: issueList, isSidebarVisible });
         } else if (message.type === "GET_STATUS") {
-            sendResponse({ isInspectMode, issueCount: issueList.length, issues: issueList });
+            sendResponse({ isInspectMode, issueCount: issueList.length, issues: issueList, isSidebarVisible });
         } else if (message.type === "CLEAR_ISSUES") {
             clearIssues();
-            sendResponse({ issueCount: 0, issues: [] });
+            renderSidebarIssues();
+            sendResponse({ issueCount: 0, issues: [], isInspectMode, isSidebarVisible });
         } else if (message.type === "GET_ALL_ISSUES") {
             sendResponse({ issues: issueList });
+        } else if (message.type === "TOGGLE_SIDEBAR") {
+            toggleSidebar();
+            sendResponse({ isSidebarVisible });
         }
         return true;
     });

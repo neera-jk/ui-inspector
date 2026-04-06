@@ -305,3 +305,215 @@
 .ui-inspector-modal[data-theme="dark"] .ui-inspector-save-btn:hover {
     background: #e5e7eb !important;
 }
+
+/* ══════════════════════════════════════════════════════
+   Sidebar
+   ══════════════════════════════════════════════════════ */
+
+/* ── Sidebar light tokens ── */
+.ui-inspector-sidebar {
+    --ui-bg: #ffffff;
+    --ui-bg-secondary: #f9fafb;
+    --ui-bg-muted: #f3f4f6;
+    --ui-border: #e5e7eb;
+    --ui-border-muted: #f0f0f0;
+    --ui-text-primary: #111827;
+    --ui-text-secondary: #6b7280;
+    --ui-text-muted: #9ca3af;
+}
+
+/* ── Sidebar dark tokens ── */
+.ui-inspector-sidebar[data-theme="dark"] {
+    --ui-bg: #2c2f38;
+    --ui-bg-secondary: #363a44;
+    --ui-bg-muted: #363a44;
+    --ui-border: #3d4149;
+    --ui-border-muted: #3d4149;
+    --ui-text-primary: #f1f2f4;
+    --ui-text-secondary: #9ca3af;
+    --ui-text-muted: #7b8290;
+}
+
+.ui-inspector-sidebar {
+    position: fixed !important;
+    top: 0 !important;
+    right: 0 !important;
+    width: 320px !important;
+    height: 100vh !important;
+    z-index: 2147483646 !important;
+    background: var(--ui-bg) !important;
+    border-left: 1px solid var(--ui-border) !important;
+    display: flex !important;
+    flex-direction: column !important;
+    font-family: system-ui, -apple-system, sans-serif !important;
+    font-size: 13px !important;
+    box-shadow: -4px 0 20px rgba(0, 0, 0, 0.08) !important;
+}
+
+.ui-inspector-sidebar * {
+    box-sizing: border-box !important;
+}
+
+/* ── Sidebar header ── */
+.ui-inspector-sb-header {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    padding: 14px 16px !important;
+    border-bottom: 1px solid var(--ui-border) !important;
+    flex-shrink: 0 !important;
+}
+
+.ui-inspector-sb-title {
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    color: var(--ui-text-primary) !important;
+    flex: 1 !important;
+}
+
+.ui-inspector-sb-count {
+    font-size: 11px !important;
+    color: var(--ui-text-muted) !important;
+    background: var(--ui-bg-muted) !important;
+    border: 0.5px solid var(--ui-border) !important;
+    border-radius: 20px !important;
+    padding: 2px 8px !important;
+}
+
+.ui-inspector-sb-close {
+    background: none !important;
+    border: none !important;
+    font-size: 14px !important;
+    cursor: pointer !important;
+    color: var(--ui-text-muted) !important;
+    padding: 2px 4px !important;
+    line-height: 1 !important;
+}
+
+.ui-inspector-sb-close:hover {
+    color: var(--ui-text-primary) !important;
+}
+
+/* ── Sidebar body (scrollable) ── */
+.ui-inspector-sb-body {
+    flex: 1 !important;
+    overflow-y: auto !important;
+    padding: 8px 0 !important;
+}
+
+.ui-inspector-sb-empty {
+    padding: 24px 16px !important;
+    text-align: center !important;
+    color: var(--ui-text-muted) !important;
+    font-size: 12px !important;
+}
+
+/* ── Issue cards ── */
+.ui-inspector-sb-card {
+    padding: 10px 16px !important;
+    border-bottom: 0.5px solid var(--ui-border-muted) !important;
+    cursor: default !important;
+}
+
+.ui-inspector-sb-card-top {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    cursor: pointer !important;
+}
+
+.ui-inspector-sb-dot {
+    width: 7px !important;
+    height: 7px !important;
+    border-radius: 50% !important;
+    flex-shrink: 0 !important;
+}
+
+.ui-inspector-sb-dot-low {
+    background: #16a34a !important;
+}
+
+.ui-inspector-sb-dot-medium {
+    background: #ca8a04 !important;
+}
+
+.ui-inspector-sb-dot-high {
+    background: #ea580c !important;
+}
+
+.ui-inspector-sb-dot-critical {
+    background: #dc2626 !important;
+}
+
+.ui-inspector-sb-card-title {
+    font-size: 12px !important;
+    color: var(--ui-text-primary) !important;
+    flex: 1 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+}
+
+.ui-inspector-sb-card-chevron {
+    font-size: 16px !important;
+    color: var(--ui-text-muted) !important;
+    flex-shrink: 0 !important;
+    transition: transform 0.2s ease !important;
+}
+
+.ui-inspector-sb-card.expanded .ui-inspector-sb-card-chevron {
+    transform: rotate(90deg) !important;
+}
+
+.ui-inspector-sb-card-meta {
+    font-size: 11px !important;
+    color: var(--ui-text-muted) !important;
+    margin-top: 2px !important;
+    padding-left: 15px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+}
+
+.ui-inspector-sb-card-detail {
+    display: none !important;
+    margin-top: 8px !important;
+    padding: 10px 12px !important;
+    background: var(--ui-bg-secondary) !important;
+    border: 1px solid var(--ui-border) !important;
+    border-radius: 8px !important;
+    font-size: 12px !important;
+    color: var(--ui-text-secondary) !important;
+    line-height: 1.6 !important;
+    word-break: break-all !important;
+    overflow-wrap: anywhere !important;
+}
+
+.ui-inspector-sb-card.expanded .ui-inspector-sb-card-detail {
+    display: block !important;
+}
+
+/* ── Sidebar footer ── */
+.ui-inspector-sb-footer {
+    display: flex !important;
+    align-items: center !important;
+    gap: 0 !important;
+    padding: 10px 16px !important;
+    border-top: 1px solid var(--ui-border) !important;
+    flex-shrink: 0 !important;
+}
+
+.ui-inspector-sb-footer-btn {
+    flex: 1 !important;
+    background: none !important;
+    border: none !important;
+    font-size: 11px !important;
+    color: var(--ui-text-muted) !important;
+    cursor: pointer !important;
+    padding: 4px 0 !important;
+    font-family: system-ui, -apple-system, sans-serif !important;
+}
+
+.ui-inspector-sb-footer-btn:hover {
+    color: var(--ui-text-secondary) !important;
+}
