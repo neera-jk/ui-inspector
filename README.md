@@ -33,6 +33,5 @@ The popup shows a live issue count and the 3 most recent issues. A dark/light th
 
 ## Coming Soon
 
-- Screenshot capture on element selection
 - Severity filtering in the issue list
-- Team export formats (CSV, Markdown, Linear import)
+- Team export formats (Markdown, Linear import)

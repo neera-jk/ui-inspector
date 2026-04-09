@@ -6,6 +6,7 @@
     let lastHighlighted = null;
     let isSidebarVisible = false;
     let sidebarEl = null;
+    let pinEls = [];
 
     // Loads any previously saved issues from localStorage, defaulting to an empty array
     function loadIssues() {
@@ -130,15 +131,19 @@
     }
 
     // Handles mouseover during inspect mode: highlights the hovered element and removes highlight from the previous one
+    let _hoverDebounceTimer = null;
     function onMouseOver(e) {
         const target = e.target;
         if (target === document.body || target === document.documentElement) return;
 
-        if (lastHighlighted && lastHighlighted !== target) {
-            lastHighlighted.classList.remove("ui-inspector-highlight");
-        }
-        target.classList.add("ui-inspector-highlight");
-        lastHighlighted = target;
+        if (_hoverDebounceTimer) clearTimeout(_hoverDebounceTimer);
+        _hoverDebounceTimer = setTimeout(function () {
+            if (lastHighlighted && lastHighlighted !== target) {
+                lastHighlighted.classList.remove("ui-inspector-highlight");
+            }
+            target.classList.add("ui-inspector-highlight");
+            lastHighlighted = target;
+        }, 16);
     }
 
     // Handles mouseout during inspect mode: removes the highlight class from the element
@@ -161,6 +166,12 @@
         }
 
         const componentName = findComponentInfo(element);
+
+        const STYLE_PROPS = ["font-size", "font-weight", "color", "background-color", "border", "border-radius", "padding", "margin", "opacity", "box-shadow", "width", "height", "display", "line-height", "letter-spacing"];
+        const computed = window.getComputedStyle(element);
+        const computedStyles = {};
+        STYLE_PROPS.forEach(function (p) { computedStyles[p] = computed.getPropertyValue(p); });
+
         const elementData = {
             tagName: element.tagName.toLowerCase(),
             id: element.id || "",
@@ -170,10 +181,14 @@
             hierarchy: getParentHierarchy(element),
             component: componentName,
             selector: getCssSelector(element),
+            computedStyles: computedStyles,
         };
 
+        const r = element.getBoundingClientRect();
+        elementData.rect = { top: r.top + window.scrollY, left: r.left + window.scrollX };
+
         disableInspectMode();
-        showInspectorModal(elementData);
+        showInspectorModal(elementData, element);
     }
 
     // Enables inspect mode by attaching mouseover, mouseout, and click listeners to the document
@@ -200,7 +215,7 @@
     }
 
     // Injects a modal overlay into the page for logging a new issue against the selected element
-    function showInspectorModal(elementData) {
+    function showInspectorModal(elementData, targetElement) {
         const backdrop = document.createElement("div");
         backdrop.className = "ui-inspector-modal";
 
@@ -208,11 +223,11 @@
             if (result["ui-inspector-theme"] === "dark") {
                 backdrop.setAttribute("data-theme", "dark");
             }
-            _buildAndMountModal(backdrop, elementData);
+            _buildAndMountModal(backdrop, elementData, targetElement);
         });
     }
 
-    function _buildAndMountModal(backdrop, elementData) {
+    function _buildAndMountModal(backdrop, elementData, targetElement) {
         let selectedSeverity = "Medium";
 
         backdrop.innerHTML = `
@@ -226,7 +241,12 @@
           <span><strong>Page:</strong> ${escapeHtml(elementData.page)}</span>
           <span><strong>Element:</strong> &lt;${escapeHtml(elementData.tagName)}&gt;</span>
           <span><strong>Selector:</strong> <code style="font-size:11px;word-break:break-all;">${escapeHtml(elementData.selector)}</code></span>
+          <div id="ui-inspector-screenshot-wrap" style="margin-top:8px;"></div>
         </div>
+        <details class="ui-inspector-styles-details">
+          <summary class="ui-inspector-styles-summary">Computed Styles</summary>
+          <div class="ui-inspector-styles-grid" id="ui-inspector-styles-grid"></div>
+        </details>
         <label class="ui-inspector-label">What is wrong?</label>
         <textarea class="ui-inspector-textarea" id="ui-inspector-what" placeholder="Describe the issue..."></textarea>
         <label class="ui-inspector-label">How should this be fixed?</label>
@@ -242,6 +262,17 @@
       </div>
     `;
 
+        // Populate computed styles grid
+        const stylesGrid = backdrop.querySelector("#ui-inspector-styles-grid");
+        if (stylesGrid && elementData.computedStyles) {
+            Object.entries(elementData.computedStyles).forEach(function ([prop, val]) {
+                const row = document.createElement("div");
+                row.className = "ui-inspector-styles-row";
+                row.innerHTML = '<span class="ui-inspector-styles-prop">' + escapeHtml(prop) + '</span><span class="ui-inspector-styles-val">' + escapeHtml(val) + '</span>';
+                stylesGrid.appendChild(row);
+            });
+        }
+
         // Handle severity button selection — only one can be active at a time
         const severityRow = backdrop.querySelector(".ui-inspector-severity-row");
         severityRow.addEventListener("click", (e) => {
@@ -256,10 +287,18 @@
 
         // Removes the modal from the DOM and re-enables inspect mode
         function closeModal() {
-            if (backdrop.parentNode) {
-                backdrop.parentNode.removeChild(backdrop);
+            var whatVal = (backdrop.querySelector("#ui-inspector-what") || {}).value || "";
+            var howVal = (backdrop.querySelector("#ui-inspector-how") || {}).value || "";
+            if (whatVal.trim() || howVal.trim()) {
+                if (!confirm("You have unsaved changes. Discard this issue?")) return;
             }
-            enableInspectMode();
+            var card = backdrop.querySelector(".ui-inspector-card");
+            if (card) card.style.animation = "uiModalCardOut 0.25s ease forwards";
+            backdrop.style.animation = "uiModalBackdropOut 0.25s ease forwards";
+            setTimeout(function () {
+                if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
+                enableInspectMode();
+            }, 250);
         }
 
         // Close button handler
@@ -300,6 +339,9 @@
                 text: elementData.innerText,
                 hierarchy: elementData.hierarchy,
                 selector: elementData.selector,
+                computedStyles: elementData.computedStyles,
+                rect: elementData.rect,
+                screenshot: backdrop.__screenshotDataUrl || "",
                 whatIsWrong: whatValue,
                 howToFix: howValue,
                 severity: selectedSeverity,
@@ -309,14 +351,34 @@
             issueList.push(issue);
             saveIssues();
 
-            if (backdrop.parentNode) {
-                backdrop.parentNode.removeChild(backdrop);
-            }
-            renderSidebarIssues();
-            enableInspectMode();
+            var card = backdrop.querySelector(".ui-inspector-card");
+            if (card) card.style.animation = "uiModalCardOut 0.25s ease forwards";
+            backdrop.style.animation = "uiModalBackdropOut 0.25s ease forwards";
+            setTimeout(function () {
+                if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
+                renderSidebarIssues();
+                enableInspectMode();
+            }, 250);
         });
 
         document.body.appendChild(backdrop);
+
+        // Capture screenshot of the target element
+        if (targetElement && typeof html2canvas === "function") {
+            html2canvas(targetElement, { scale: 1, useCORS: true, logging: false }).then(function (canvas) {
+                var dataUrl = canvas.toDataURL("image/png");
+                backdrop.__screenshotDataUrl = dataUrl;
+                var wrap = backdrop.querySelector("#ui-inspector-screenshot-wrap");
+                if (wrap) {
+                    var img = document.createElement("img");
+                    img.src = dataUrl;
+                    img.style.cssText = "max-width:100%;border-radius:6px;border:1px solid var(--ui-border);margin-top:4px;";
+                    wrap.appendChild(img);
+                }
+            }).catch(function (err) {
+                console.warn("[UI Inspector] Screenshot capture failed:", err.message || err);
+            });
+        }
     }
 
     // ── Sidebar ──
@@ -346,6 +408,7 @@
 
             document.body.appendChild(sidebarEl);
             renderSidebarIssues();
+            renderPins();
 
             sidebarEl.querySelector("#ui-inspector-sb-close").addEventListener("click", hideSidebar);
 
@@ -367,6 +430,7 @@
             });
 
             sidebarEl.querySelector("#ui-inspector-sb-clear").addEventListener("click", function () {
+                if (!confirm("Clear all issues? This cannot be undone.")) return;
                 clearIssues();
                 renderSidebarIssues();
             });
@@ -375,8 +439,13 @@
 
     function hideSidebar() {
         isSidebarVisible = false;
-        if (sidebarEl && sidebarEl.parentNode) {
-            sidebarEl.parentNode.removeChild(sidebarEl);
+        clearPins();
+        if (sidebarEl) {
+            sidebarEl.style.animation = "uiSidebarSlideOut 0.25s ease forwards";
+            var el = sidebarEl;
+            setTimeout(function () {
+                if (el && el.parentNode) el.parentNode.removeChild(el);
+            }, 250);
         }
         sidebarEl = null;
     }
@@ -422,6 +491,8 @@
                 '<div><strong>Fix:</strong> ' + escapeHtml(issue.howToFix || "") + '</div>' +
                 '<div><strong>Element:</strong> &lt;' + escapeHtml(issue.element || "") + '&gt;</div>' +
                 '<div><strong>Selector:</strong> <code style="font-size:11px;word-break:break-all;">' + escapeHtml(issue.selector || "") + '</code></div>' +
+                (issue.computedStyles ? '<div style="margin-top:6px;"><strong>Styles:</strong><div style="font-size:11px;font-family:monospace;margin-top:4px;line-height:1.8;">' + Object.entries(issue.computedStyles).map(function ([p, v]) { return escapeHtml(p) + ': ' + escapeHtml(v); }).join('<br>') + '</div></div>' : '') +
+                (issue.screenshot ? '<div style="margin-top:8px;"><img src="' + escapeHtml(issue.screenshot) + '" style="max-width:100%;border-radius:6px;border:1px solid #e5e7eb;" /></div>' : '') +
                 '<div><strong>Time:</strong> ' + escapeHtml(ts) + '</div>' +
                 '</div>';
 
@@ -431,6 +502,37 @@
 
             body.appendChild(card);
         });
+
+        if (isSidebarVisible) renderPins();
+    }
+
+    // ── Pins ──
+
+    function renderPins() {
+        clearPins();
+        issueList.forEach(function (issue, idx) {
+            if (!issue.rect) return;
+            var pin = document.createElement("div");
+            pin.className = "ui-inspector-pin ui-inspector-pin-" + (issue.severity || "medium").toLowerCase();
+            pin.style.top = issue.rect.top + "px";
+            pin.style.left = issue.rect.left + "px";
+            pin.textContent = idx + 1;
+
+            var tooltip = document.createElement("div");
+            tooltip.className = "ui-inspector-pin-tooltip";
+            tooltip.textContent = (issue.whatIsWrong || "Untitled") + " \u00b7 " + (issue.severity || "Medium");
+            pin.appendChild(tooltip);
+
+            document.body.appendChild(pin);
+            pinEls.push(pin);
+        });
+    }
+
+    function clearPins() {
+        pinEls.forEach(function (p) {
+            if (p.parentNode) p.parentNode.removeChild(p);
+        });
+        pinEls = [];
     }
 
     function downloadFile(content, filename, type) {

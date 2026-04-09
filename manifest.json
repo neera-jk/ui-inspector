@@ -14,12 +14,23 @@
                 "<all_urls>"
             ],
             "js": [
+                "html2canvas.min.js",
                 "content.js"
             ],
             "css": [
                 "content.css"
             ],
             "run_at": "document_idle"
+        }
+    ],
+    "web_accessible_resources": [
+        {
+            "resources": [
+                "html2canvas.min.js"
+            ],
+            "matches": [
+                "<all_urls>"
+            ]
         }
     ],
     "action": {
