@@ -6,7 +6,8 @@
     let lastHighlighted = null;
     let isSidebarVisible = false;
     let sidebarEl = null;
-    let pinEls = [];
+    let _sidebarClosing = false;
+    let _modalClosing = false;
 
     // Loads any previously saved issues from localStorage, defaulting to an empty array
     function loadIssues() {
@@ -131,19 +132,15 @@
     }
 
     // Handles mouseover during inspect mode: highlights the hovered element and removes highlight from the previous one
-    let _hoverDebounceTimer = null;
     function onMouseOver(e) {
         const target = e.target;
         if (target === document.body || target === document.documentElement) return;
 
-        if (_hoverDebounceTimer) clearTimeout(_hoverDebounceTimer);
-        _hoverDebounceTimer = setTimeout(function () {
-            if (lastHighlighted && lastHighlighted !== target) {
-                lastHighlighted.classList.remove("ui-inspector-highlight");
-            }
-            target.classList.add("ui-inspector-highlight");
-            lastHighlighted = target;
-        }, 16);
+        if (lastHighlighted && lastHighlighted !== target) {
+            lastHighlighted.classList.remove("ui-inspector-highlight");
+        }
+        target.classList.add("ui-inspector-highlight");
+        lastHighlighted = target;
     }
 
     // Handles mouseout during inspect mode: removes the highlight class from the element
@@ -183,9 +180,6 @@
             selector: getCssSelector(element),
             computedStyles: computedStyles,
         };
-
-        const r = element.getBoundingClientRect();
-        elementData.rect = { top: r.top + window.scrollY, left: r.left + window.scrollX };
 
         disableInspectMode();
         showInspectorModal(elementData, element);
@@ -287,15 +281,18 @@
 
         // Removes the modal from the DOM and re-enables inspect mode
         function closeModal() {
+            if (_modalClosing) return;
             var whatVal = (backdrop.querySelector("#ui-inspector-what") || {}).value || "";
             var howVal = (backdrop.querySelector("#ui-inspector-how") || {}).value || "";
             if (whatVal.trim() || howVal.trim()) {
                 if (!confirm("You have unsaved changes. Discard this issue?")) return;
             }
+            _modalClosing = true;
             var card = backdrop.querySelector(".ui-inspector-card");
             if (card) card.style.animation = "uiModalCardOut 0.25s ease forwards";
             backdrop.style.animation = "uiModalBackdropOut 0.25s ease forwards";
             setTimeout(function () {
+                _modalClosing = false;
                 if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
                 enableInspectMode();
             }, 250);
@@ -340,7 +337,6 @@
                 hierarchy: elementData.hierarchy,
                 selector: elementData.selector,
                 computedStyles: elementData.computedStyles,
-                rect: elementData.rect,
                 screenshot: backdrop.__screenshotDataUrl || "",
                 whatIsWrong: whatValue,
                 howToFix: howValue,
@@ -351,10 +347,12 @@
             issueList.push(issue);
             saveIssues();
 
+            _modalClosing = true;
             var card = backdrop.querySelector(".ui-inspector-card");
             if (card) card.style.animation = "uiModalCardOut 0.25s ease forwards";
             backdrop.style.animation = "uiModalBackdropOut 0.25s ease forwards";
             setTimeout(function () {
+                _modalClosing = false;
                 if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
                 renderSidebarIssues();
                 enableInspectMode();
@@ -363,28 +361,38 @@
 
         document.body.appendChild(backdrop);
 
-        // Capture screenshot of the target element
-        if (targetElement && typeof html2canvas === "function") {
-            html2canvas(targetElement, { scale: 1, useCORS: true, logging: false }).then(function (canvas) {
-                var dataUrl = canvas.toDataURL("image/png");
-                backdrop.__screenshotDataUrl = dataUrl;
-                var wrap = backdrop.querySelector("#ui-inspector-screenshot-wrap");
-                if (wrap) {
-                    var img = document.createElement("img");
-                    img.src = dataUrl;
-                    img.style.cssText = "max-width:100%;border-radius:6px;border:1px solid var(--ui-border);margin-top:4px;";
-                    wrap.appendChild(img);
-                }
-            }).catch(function (err) {
-                console.warn("[UI Inspector] Screenshot capture failed:", err.message || err);
-            });
+        // Capture screenshot of the target element (lazy-load html2canvas)
+        if (targetElement && typeof html2canvas !== "function" && !document.querySelector('script[src*="html2canvas"]')) {
+            var s = document.createElement("script");
+            s.src = chrome.runtime.getURL("html2canvas.min.js");
+            s.onload = function () { _captureScreenshot(targetElement, backdrop); };
+            document.head.appendChild(s);
+        } else if (targetElement && typeof html2canvas === "function") {
+            _captureScreenshot(targetElement, backdrop);
         }
+    }
+
+    function _captureScreenshot(targetElement, backdrop) {
+        if (typeof html2canvas !== "function") return;
+        html2canvas(targetElement, { scale: 1, useCORS: true, logging: false }).then(function (canvas) {
+            var dataUrl = canvas.toDataURL("image/png");
+            backdrop.__screenshotDataUrl = dataUrl;
+            var wrap = backdrop.querySelector("#ui-inspector-screenshot-wrap");
+            if (wrap) {
+                var img = document.createElement("img");
+                img.src = dataUrl;
+                img.style.cssText = "max-width:100%;border-radius:6px;border:1px solid var(--ui-border);margin-top:4px;";
+                wrap.appendChild(img);
+            }
+        }).catch(function (err) {
+            console.warn("[UI Inspector] Screenshot capture failed:", err.message || err);
+        });
     }
 
     // ── Sidebar ──
 
     function showSidebar() {
-        if (sidebarEl) return;
+        if (sidebarEl || _sidebarClosing) return;
         isSidebarVisible = true;
         sidebarEl = document.createElement("div");
         sidebarEl.className = "ui-inspector-sidebar";
@@ -408,7 +416,6 @@
 
             document.body.appendChild(sidebarEl);
             renderSidebarIssues();
-            renderPins();
 
             sidebarEl.querySelector("#ui-inspector-sb-close").addEventListener("click", hideSidebar);
 
@@ -438,13 +445,15 @@
     }
 
     function hideSidebar() {
+        if (_sidebarClosing) return;
         isSidebarVisible = false;
-        clearPins();
         if (sidebarEl) {
+            _sidebarClosing = true;
             sidebarEl.style.animation = "uiSidebarSlideOut 0.25s ease forwards";
             var el = sidebarEl;
             setTimeout(function () {
                 if (el && el.parentNode) el.parentNode.removeChild(el);
+                _sidebarClosing = false;
             }, 250);
         }
         sidebarEl = null;
@@ -503,36 +512,6 @@
             body.appendChild(card);
         });
 
-        if (isSidebarVisible) renderPins();
-    }
-
-    // ── Pins ──
-
-    function renderPins() {
-        clearPins();
-        issueList.forEach(function (issue, idx) {
-            if (!issue.rect) return;
-            var pin = document.createElement("div");
-            pin.className = "ui-inspector-pin ui-inspector-pin-" + (issue.severity || "medium").toLowerCase();
-            pin.style.top = issue.rect.top + "px";
-            pin.style.left = issue.rect.left + "px";
-            pin.textContent = idx + 1;
-
-            var tooltip = document.createElement("div");
-            tooltip.className = "ui-inspector-pin-tooltip";
-            tooltip.textContent = (issue.whatIsWrong || "Untitled") + " \u00b7 " + (issue.severity || "Medium");
-            pin.appendChild(tooltip);
-
-            document.body.appendChild(pin);
-            pinEls.push(pin);
-        });
-    }
-
-    function clearPins() {
-        pinEls.forEach(function (p) {
-            if (p.parentNode) p.parentNode.removeChild(p);
-        });
-        pinEls = [];
     }
 
     function downloadFile(content, filename, type) {
@@ -574,6 +553,8 @@
     // Expose viewIssues and clearIssues on window for console access
     window.viewIssues = viewIssues;
     window.clearIssues = clearIssues;
+    window.inspectUI = enableInspectMode;
+    window.toggleSidebar = toggleSidebar;
 
     // Listens for messages from the popup and responds with current state or toggles inspect mode
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

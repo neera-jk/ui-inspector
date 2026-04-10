@@ -97,13 +97,23 @@
         </ul>
     </div>
 
+    <link rel="stylesheet" href="./content.css">
+    <script>
+        // Shim chrome APIs so content.js can run outside the extension
+        if (typeof chrome === 'undefined' || !chrome.runtime) {
+            window.chrome = {
+                runtime: {
+                    onMessage: { addListener: function () { } },
+                    getURL: function (path) { return './' + path; }
+                },
+                storage: { local: { get: function (k, cb) { cb({}); } } }
+            };
+        }
+    </script>
     <script src="./content.js"></script>
     <script>
-        if (typeof setupUIInspector === 'function') {
-            setupUIInspector();
-        } else {
-            console.error('[inspector] script failed to load - setupUIInspector not found');
-        }
+        // Expose a helper to start inspect mode from the console
+        console.log('[UI Inspector] Test page loaded. Run inspectUI() to start inspecting, toggleSidebar() to open the sidebar.');
     </script>
 </body>
 

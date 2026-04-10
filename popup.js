@@ -14,7 +14,7 @@ function sendMessageToActiveTab(message) {
                     if (errMsg.includes("Could not establish connection")) {
                         // Content script not injected — inject it now and retry
                         Promise.all([
-                            chrome.scripting.executeScript({ target: { tabId }, files: ["html2canvas.min.js", "content.js"] }),
+                            chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] }),
                             chrome.scripting.insertCSS({ target: { tabId }, files: ["content.css"] }),
                         ])
                             .then(() => {
@@ -105,13 +105,14 @@ document.addEventListener("DOMContentLoaded", () => {
     // Apply saved theme to body
     chrome.storage.local.get("ui-inspector-theme", (result) => {
         if (result["ui-inspector-theme"] === "dark") {
+            document.documentElement.setAttribute("data-theme", "dark");
             document.body.setAttribute("data-theme", "dark");
         }
     });
 
     // Theme toggle
     document.getElementById("themeToggle").addEventListener("click", () => {
-        const isDark = document.body.getAttribute("data-theme") === "dark";
+        const isDark = document.documentElement.getAttribute("data-theme") === "dark";
         if (isDark) {
             document.body.removeAttribute("data-theme");
             document.documentElement.removeAttribute("data-theme");
