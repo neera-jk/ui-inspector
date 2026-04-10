@@ -14,7 +14,7 @@ function sendMessageToActiveTab(message) {
                     if (errMsg.includes("Could not establish connection")) {
                         // Content script not injected — inject it now and retry
                         Promise.all([
-                            chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] }),
+                            chrome.scripting.executeScript({ target: { tabId }, files: ["html2canvas.min.js", "content.js"] }),
                             chrome.scripting.insertCSS({ target: { tabId }, files: ["content.css"] }),
                         ])
                             .then(() => {

@@ -1,6 +1,9 @@
 (() => {
     "use strict";
 
+    if (window.__uiInspectorLoaded) return;
+    window.__uiInspectorLoaded = true;
+
     let isInspectMode = false;
     let issueList = [];
     let lastHighlighted = null;
@@ -9,26 +12,50 @@
     let _sidebarClosing = false;
     let _modalClosing = false;
 
-    // Loads any previously saved issues from localStorage, defaulting to an empty array
-    function loadIssues() {
-        try {
-            const raw = localStorage.getItem("ui-inspector-issues");
-            if (raw) {
-                const parsed = JSON.parse(raw);
-                if (Array.isArray(parsed)) {
-                    issueList = parsed;
-                    return;
+    // Loads any previously saved issues from chrome.storage.local, defaulting to an empty array
+    // On first run, migrates any issues from localStorage (per-origin) to chrome.storage.local
+    function loadIssues(callback) {
+        chrome.storage.local.get("ui-inspector-issues", function (result) {
+            try {
+                var data = result["ui-inspector-issues"];
+                if (Array.isArray(data) && data.length > 0) {
+                    issueList = data;
+                } else {
+                    // One-time migration from localStorage
+                    try {
+                        var raw = localStorage.getItem("ui-inspector-issues");
+                        if (raw) {
+                            var parsed = JSON.parse(raw);
+                            if (Array.isArray(parsed) && parsed.length > 0) {
+                                issueList = parsed;
+                                localStorage.removeItem("ui-inspector-issues");
+                                chrome.storage.local.set({ "ui-inspector-issues": issueList });
+                                console.log("[UI Inspector] Migrated", issueList.length, "issues from localStorage");
+                            } else {
+                                issueList = [];
+                            }
+                        } else {
+                            issueList = [];
+                        }
+                    } catch (e) {
+                        issueList = [];
+                    }
                 }
+            } catch (e) {
+                issueList = [];
             }
-        } catch (e) {
-            // ignore parse errors
-        }
-        issueList = [];
+            if (typeof callback === "function") callback();
+        });
     }
 
-    // Persists the current issueList array to localStorage as JSON
-    function saveIssues() {
-        localStorage.setItem("ui-inspector-issues", JSON.stringify(issueList));
+    // Persists the current issueList array to chrome.storage.local
+    function saveIssues(callback) {
+        chrome.storage.local.set({ "ui-inspector-issues": issueList }, function () {
+            if (chrome.runtime.lastError) {
+                console.warn("[UI Inspector] Failed to save issues:", chrome.runtime.lastError.message);
+            }
+            if (typeof callback === "function") callback();
+        });
     }
 
     // Walks up the React Fiber tree (up to 20 levels) to find the nearest component name.
@@ -361,32 +388,22 @@
 
         document.body.appendChild(backdrop);
 
-        // Capture screenshot of the target element (lazy-load html2canvas)
-        if (targetElement && typeof html2canvas !== "function" && !document.querySelector('script[src*="html2canvas"]')) {
-            var s = document.createElement("script");
-            s.src = chrome.runtime.getURL("html2canvas.min.js");
-            s.onload = function () { _captureScreenshot(targetElement, backdrop); };
-            document.head.appendChild(s);
-        } else if (targetElement && typeof html2canvas === "function") {
-            _captureScreenshot(targetElement, backdrop);
+        // Capture screenshot of the target element
+        if (targetElement && typeof html2canvas === "function") {
+            html2canvas(targetElement, { scale: 1, useCORS: true, logging: false }).then(function (canvas) {
+                var dataUrl = canvas.toDataURL("image/png");
+                backdrop.__screenshotDataUrl = dataUrl;
+                var wrap = backdrop.querySelector("#ui-inspector-screenshot-wrap");
+                if (wrap) {
+                    var img = document.createElement("img");
+                    img.src = dataUrl;
+                    img.style.cssText = "max-width:100%;border-radius:6px;border:1px solid var(--ui-border);margin-top:4px;";
+                    wrap.appendChild(img);
+                }
+            }).catch(function (err) {
+                console.warn("[UI Inspector] Screenshot capture failed:", err.message || err);
+            });
         }
-    }
-
-    function _captureScreenshot(targetElement, backdrop) {
-        if (typeof html2canvas !== "function") return;
-        html2canvas(targetElement, { scale: 1, useCORS: true, logging: false }).then(function (canvas) {
-            var dataUrl = canvas.toDataURL("image/png");
-            backdrop.__screenshotDataUrl = dataUrl;
-            var wrap = backdrop.querySelector("#ui-inspector-screenshot-wrap");
-            if (wrap) {
-                var img = document.createElement("img");
-                img.src = dataUrl;
-                img.style.cssText = "max-width:100%;border-radius:6px;border:1px solid var(--ui-border);margin-top:4px;";
-                wrap.appendChild(img);
-            }
-        }).catch(function (err) {
-            console.warn("[UI Inspector] Screenshot capture failed:", err.message || err);
-        });
     }
 
     // ── Sidebar ──
@@ -543,11 +560,13 @@
         return issueList;
     }
 
-    // Clears all logged issues from memory and localStorage
-    function clearIssues() {
+    // Clears all logged issues from memory and chrome.storage.local
+    function clearIssues(callback) {
         issueList = [];
-        localStorage.removeItem("ui-inspector-issues");
-        console.log("[UI Inspector] All issues cleared.");
+        chrome.storage.local.remove("ui-inspector-issues", function () {
+            console.log("[UI Inspector] All issues cleared.");
+            if (typeof callback === "function") callback();
+        });
     }
 
     // Expose viewIssues and clearIssues on window for console access
@@ -581,6 +600,7 @@
     });
 
     // Initialize by loading saved issues
-    loadIssues();
-    console.log("[UI Inspector] Content script loaded. Issues in storage:", issueList.length);
+    loadIssues(function () {
+        console.log("[UI Inspector] Content script loaded. Issues in storage:", issueList.length);
+    });
 })();
