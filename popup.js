@@ -38,7 +38,7 @@ function sendMessageToActiveTab(message) {
                             chrome.scripting.insertCSS({ target: { tabId }, files: ["content.css"] }),
                         ])
                             .then(() => {
-                                chrome.tabs.sendMessage(tabId, message, (retryResponse) => {
+                                chrome.tabs.sendMessage(tabId, message, { frameId: 0 }, (retryResponse) => {
                                     if (chrome.runtime.lastError) {
                                         reject(new Error(chrome.runtime.lastError.message));
                                         return;
