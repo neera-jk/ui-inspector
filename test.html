@@ -104,9 +104,17 @@
             window.chrome = {
                 runtime: {
                     onMessage: { addListener: function () { } },
-                    getURL: function (path) { return './' + path; }
+                    getURL: function (path) { return './' + path; },
+                    lastError: null
                 },
-                storage: { local: { get: function (k, cb) { cb({}); } } }
+                storage: {
+                    local: {
+                        get: function (k, cb) { cb({}); },
+                        set: function (obj, cb) { if (cb) cb(); },
+                        remove: function (k, cb) { if (cb) cb(); }
+                    },
+                    onChanged: { addListener: function () { } }
+                }
             };
         }
     </script>

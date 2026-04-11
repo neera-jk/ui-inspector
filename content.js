@@ -7,6 +7,7 @@
     let isInspectMode = false;
     let issueList = [];
     let lastHighlighted = null;
+    let _highlightOverlay = null;
     let isSidebarVisible = false;
     let sidebarEl = null;
     let _sidebarClosing = false;
@@ -118,7 +119,7 @@
         return "Unknown";
     }
 
-    // Builds a 3-level parent hierarchy string (e.g. "div.container > section.main > article.card")
+    // Builds a 3-level parent hierarchy string (e.g. "section.main > div.container > article.card")
     function getParentHierarchy(element) {
         const parts = [];
         let current = element.parentElement;
@@ -130,7 +131,7 @@
             current = current.parentElement;
             levels++;
         }
-        return parts.join(" > ");
+        return parts.reverse().join(" > ");
     }
 
     // Builds a unique CSS selector path from the element up to body
@@ -141,11 +142,11 @@
         var depth = 0;
         while (current && current !== document.body && current !== document.documentElement && depth < 10) {
             if (current.id) {
-                segments.push("#" + current.id);
+                segments.push("#" + CSS.escape(current.id));
                 break;
             }
             var tag = current.tagName.toLowerCase();
-            var firstClass = current.classList && current.classList.length > 0 ? "." + current.classList[0] : "";
+            var firstClass = current.classList && current.classList.length > 0 ? "." + CSS.escape(current.classList[0]) : "";
             var nth = "";
             if (current.parentElement) {
                 var idx = Array.from(current.parentElement.children).indexOf(current) + 1;
@@ -158,22 +159,41 @@
         return segments.reverse().join(" > ");
     }
 
-    // Handles mouseover during inspect mode: highlights the hovered element and removes highlight from the previous one
+    // Handles mouseover during inspect mode: highlights the hovered element with an overlay
     function onMouseOver(e) {
         const target = e.target;
         if (target === document.body || target === document.documentElement) return;
 
-        if (lastHighlighted && lastHighlighted !== target) {
-            lastHighlighted.classList.remove("ui-inspector-highlight");
-        }
-        target.classList.add("ui-inspector-highlight");
+        if (lastHighlighted === target) return;
         lastHighlighted = target;
+        _showHighlightOverlay(target);
     }
 
-    // Handles mouseout during inspect mode: removes the highlight class from the element
+    // Handles mouseout during inspect mode: removes the highlight overlay
     function onMouseOut(e) {
-        const target = e.target;
-        target.classList.remove("ui-inspector-highlight");
+        if (lastHighlighted === e.target) {
+            lastHighlighted = null;
+            _removeHighlightOverlay();
+        }
+    }
+
+    function _showHighlightOverlay(el) {
+        _removeHighlightOverlay();
+        var rect = el.getBoundingClientRect();
+        var overlay = document.createElement("div");
+        overlay.className = "ui-inspector-highlight";
+        overlay.style.cssText = "position:fixed;pointer-events:none;z-index:2147483646;"
+            + "top:" + rect.top + "px;left:" + rect.left + "px;"
+            + "width:" + rect.width + "px;height:" + rect.height + "px;";
+        document.body.appendChild(overlay);
+        _highlightOverlay = overlay;
+    }
+
+    function _removeHighlightOverlay() {
+        if (_highlightOverlay && _highlightOverlay.parentNode) {
+            _highlightOverlay.parentNode.removeChild(_highlightOverlay);
+        }
+        _highlightOverlay = null;
     }
 
     // Handles click during inspect mode: prevents default behavior, collects element data, and opens the issue modal
@@ -185,8 +205,8 @@
 
         // Remove highlight from clicked element
         if (lastHighlighted) {
-            lastHighlighted.classList.remove("ui-inspector-highlight");
             lastHighlighted = null;
+            _removeHighlightOverlay();
         }
 
         const componentName = findComponentInfo(element);
@@ -199,7 +219,7 @@
         const elementData = {
             tagName: element.tagName.toLowerCase(),
             id: element.id || "",
-            className: element.className || "",
+            className: element.getAttribute("class") || "",
             innerText: (element.innerText || "").substring(0, 50),
             page: window.location.pathname,
             hierarchy: getParentHierarchy(element),
@@ -230,8 +250,8 @@
         document.body.style.cursor = "";
 
         if (lastHighlighted) {
-            lastHighlighted.classList.remove("ui-inspector-highlight");
             lastHighlighted = null;
+            _removeHighlightOverlay();
         }
     }
 
@@ -239,6 +259,9 @@
     function showInspectorModal(elementData, targetElement) {
         const backdrop = document.createElement("div");
         backdrop.className = "ui-inspector-modal";
+        backdrop.setAttribute("role", "dialog");
+        backdrop.setAttribute("aria-modal", "true");
+        backdrop.setAttribute("aria-labelledby", "ui-inspector-modal-title");
 
         chrome.storage.local.get("ui-inspector-theme", (result) => {
             if (result["ui-inspector-theme"] === "dark") {
@@ -254,7 +277,7 @@
         backdrop.innerHTML = `
       <div class="ui-inspector-card">
         <div class="ui-inspector-header">
-          <h2>Log Issue</h2>
+          <h2 id="ui-inspector-modal-title">Log Issue</h2>
           <button class="ui-inspector-close-btn" data-action="close">✕</button>
         </div>
         <div class="ui-inspector-info">
@@ -320,6 +343,7 @@
             backdrop.style.animation = "uiModalBackdropOut 0.25s ease forwards";
             setTimeout(function () {
                 _modalClosing = false;
+                document.removeEventListener("keydown", onKeyDown, true);
                 if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
                 enableInspectMode();
             }, 250);
@@ -327,6 +351,35 @@
 
         // Close button handler
         backdrop.querySelector("[data-action='close']").addEventListener("click", closeModal);
+
+        // Escape key handler
+        function onKeyDown(e) {
+            if (e.key === "Escape") {
+                closeModal();
+                return;
+            }
+            // Focus trap: keep Tab/Shift+Tab within the modal card
+            if (e.key === "Tab") {
+                var card = backdrop.querySelector(".ui-inspector-card");
+                if (!card) return;
+                var focusable = card.querySelectorAll('button, textarea, input, [tabindex]:not([tabindex="-1"])');
+                if (focusable.length === 0) return;
+                var first = focusable[0];
+                var last = focusable[focusable.length - 1];
+                if (e.shiftKey) {
+                    if (document.activeElement === first) {
+                        e.preventDefault();
+                        last.focus();
+                    }
+                } else {
+                    if (document.activeElement === last) {
+                        e.preventDefault();
+                        first.focus();
+                    }
+                }
+            }
+        }
+        document.addEventListener("keydown", onKeyDown, true);
 
         // Clicking the backdrop (outside the card) closes the modal
         backdrop.addEventListener("click", (e) => {
@@ -354,7 +407,7 @@
             }
 
             const issue = {
-                id: Date.now().toString(36) + Math.random().toString(36).substring(2, 7),
+                id: crypto.randomUUID(),
                 component: elementData.component,
                 page: elementData.page,
                 element: elementData.tagName,
@@ -380,6 +433,7 @@
             backdrop.style.animation = "uiModalBackdropOut 0.25s ease forwards";
             setTimeout(function () {
                 _modalClosing = false;
+                document.removeEventListener("keydown", onKeyDown, true);
                 if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
                 renderSidebarIssues();
                 enableInspectMode();
@@ -388,21 +442,28 @@
 
         document.body.appendChild(backdrop);
 
-        // Capture screenshot of the target element
+        // Capture screenshot of the target element (skip if element is very large)
         if (targetElement && typeof html2canvas === "function") {
-            html2canvas(targetElement, { scale: 1, useCORS: true, logging: false }).then(function (canvas) {
-                var dataUrl = canvas.toDataURL("image/png");
-                backdrop.__screenshotDataUrl = dataUrl;
-                var wrap = backdrop.querySelector("#ui-inspector-screenshot-wrap");
-                if (wrap) {
-                    var img = document.createElement("img");
-                    img.src = dataUrl;
-                    img.style.cssText = "max-width:100%;border-radius:6px;border:1px solid var(--ui-border);margin-top:4px;";
-                    wrap.appendChild(img);
-                }
-            }).catch(function (err) {
-                console.warn("[UI Inspector] Screenshot capture failed:", err.message || err);
-            });
+            var rect = targetElement.getBoundingClientRect();
+            if (rect.width > 2000 || rect.height > 2000) {
+                console.warn("[UI Inspector] Element too large for screenshot ("
+                    + Math.round(rect.width) + "x" + Math.round(rect.height)
+                    + "), skipping capture.");
+            } else {
+                html2canvas(targetElement, { scale: 1, useCORS: true, logging: false }).then(function (canvas) {
+                    var dataUrl = canvas.toDataURL("image/png");
+                    backdrop.__screenshotDataUrl = dataUrl;
+                    var wrap = backdrop.querySelector("#ui-inspector-screenshot-wrap");
+                    if (wrap) {
+                        var img = document.createElement("img");
+                        img.src = dataUrl;
+                        img.style.cssText = "max-width:100%;border-radius:6px;border:1px solid var(--ui-border);margin-top:4px;";
+                        wrap.appendChild(img);
+                    }
+                }).catch(function (err) {
+                    console.warn("[UI Inspector] Screenshot capture failed:", err.message || err);
+                });
+            }
         }
     }
 
@@ -413,6 +474,8 @@
         isSidebarVisible = true;
         sidebarEl = document.createElement("div");
         sidebarEl.className = "ui-inspector-sidebar";
+        sidebarEl.setAttribute("role", "complementary");
+        sidebarEl.setAttribute("aria-label", "UI Inspector issues panel");
 
         chrome.storage.local.get("ui-inspector-theme", (result) => {
             if (result["ui-inspector-theme"] === "dark") {
@@ -575,6 +638,28 @@
     window.inspectUI = enableInspectMode;
     window.toggleSidebar = toggleSidebar;
 
+    // Listen for theme changes and update open sidebar/modal in real time
+    chrome.storage.onChanged.addListener(function (changes, area) {
+        if (area === "local" && changes["ui-inspector-theme"]) {
+            var newTheme = changes["ui-inspector-theme"].newValue;
+            if (sidebarEl) {
+                if (newTheme === "dark") {
+                    sidebarEl.setAttribute("data-theme", "dark");
+                } else {
+                    sidebarEl.removeAttribute("data-theme");
+                }
+            }
+            var modal = document.querySelector(".ui-inspector-modal");
+            if (modal) {
+                if (newTheme === "dark") {
+                    modal.setAttribute("data-theme", "dark");
+                } else {
+                    modal.removeAttribute("data-theme");
+                }
+            }
+        }
+    });
+
     // Listens for messages from the popup and responds with current state or toggles inspect mode
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (message.type === "TOGGLE_INSPECT") {
@@ -595,6 +680,8 @@
         } else if (message.type === "TOGGLE_SIDEBAR") {
             toggleSidebar();
             sendResponse({ isSidebarVisible });
+        } else {
+            sendResponse({ error: "Unknown message type" });
         }
         return true;
     });

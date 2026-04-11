@@ -8,7 +8,7 @@ function sendMessageToActiveTab(message) {
                 return;
             }
             const tabId = tabs[0].id;
-            chrome.tabs.sendMessage(tabId, message, (response) => {
+            chrome.tabs.sendMessage(tabId, message, { frameId: 0 }, (response) => {
                 if (chrome.runtime.lastError) {
                     const errMsg = chrome.runtime.lastError.message || "";
                     if (errMsg.includes("Could not establish connection")) {
@@ -38,12 +38,6 @@ function sendMessageToActiveTab(message) {
     });
 }
 
-function escapeHtml(str) {
-    const div = document.createElement("div");
-    div.appendChild(document.createTextNode(str));
-    return div.innerHTML;
-}
-
 // Updates all UI elements based on current state
 function updateUI(isInspectMode, issueCount) {
     const dot = document.getElementById("statusDot");
@@ -71,29 +65,6 @@ function downloadJSON(issues) {
     const a = document.createElement("a");
     a.href = url;
     a.download = "ui-inspector-export.json";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-}
-
-// Triggers a CSV file download with all issues
-function downloadCSV(issues) {
-    if (!issues || issues.length === 0) return;
-    var headers = ["id", "severity", "whatIsWrong", "howToFix", "component", "page", "element", "timestamp"];
-    var csvRows = [headers.join(",")];
-    issues.forEach(function (issue) {
-        var row = headers.map(function (h) {
-            var val = (issue[h] || "").toString().replace(/"/g, '""');
-            return '"' + val + '"';
-        });
-        csvRows.push(row.join(","));
-    });
-    var blob = new Blob([csvRows.join("\n")], { type: "text/csv" });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement("a");
-    a.href = url;
-    a.download = "ui-inspector-export.csv";
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -137,6 +108,7 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         })
         .catch(() => {
+            console.warn("[UI Inspector] Could not get status from content script.");
             updateUI(false, 0);
         });
 
@@ -148,7 +120,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     updateUI(response.isInspectMode, response.issueCount);
                 }
             })
-            .catch(() => { });
+            .catch((err) => { console.warn("[UI Inspector] Toggle inspect failed:", err.message); });
     });
 
     // Toggle sidebar panel
@@ -159,7 +131,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     document.getElementById("panelBtn").textContent = response.isSidebarVisible ? "Hide Panel" : "Show Panel";
                 }
             })
-            .catch(() => { });
+            .catch((err) => { console.warn("[UI Inspector] Toggle sidebar failed:", err.message); });
     });
 
     // Clear all issues
@@ -171,7 +143,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     updateUI(response.isInspectMode, 0);
                 }
             })
-            .catch(() => { });
+            .catch((err) => { console.warn("[UI Inspector] Clear issues failed:", err.message); });
     });
 
     // Export JSON
@@ -182,6 +154,6 @@ document.addEventListener("DOMContentLoaded", () => {
                     downloadJSON(response.issues);
                 }
             })
-            .catch(() => { });
+            .catch((err) => { console.warn("[UI Inspector] Export failed:", err.message); });
     });
 });

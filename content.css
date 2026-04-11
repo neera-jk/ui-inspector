@@ -1,8 +1,8 @@
-/* Highlight outline applied to hovered elements during inspect mode */
+/* Highlight overlay shown on hovered elements during inspect mode */
 .ui-inspector-highlight {
     outline: 2px solid #ef4444 !important;
     outline-offset: 2px !important;
-    cursor: crosshair !important;
+    background: rgba(239, 68, 68, 0.08) !important;
     transition: outline-color 0.2s ease, outline-offset 0.2s ease !important;
 }
 
@@ -692,4 +692,20 @@
 
 .ui-inspector-sb-footer-btn:active {
     transform: scale(0.93) !important;
+}
+
+/* ══════════════════════════════════════════════════════
+   Reduced Motion
+   ══════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+
+    .ui-inspector-modal,
+    .ui-inspector-card,
+    .ui-inspector-sidebar,
+    .ui-inspector-sb-card,
+    .ui-inspector-sb-card.expanded .ui-inspector-sb-card-detail,
+    .ui-inspector-highlight {
+        animation: none !important;
+        transition: none !important;
+    }
 }

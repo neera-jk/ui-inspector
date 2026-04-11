@@ -279,3 +279,17 @@ body {
 .footer-btn:active {
     transform: scale(0.95);
 }
+
+/* ── Reduced Motion ── */
+@media (prefers-reduced-motion: reduce) {
+
+    body,
+    .cta-btn,
+    .panel-btn,
+    .theme-toggle,
+    .status-dot,
+    .footer-btn {
+        animation: none !important;
+        transition: none !important;
+    }
+}
