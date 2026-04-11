@@ -1,37 +1,62 @@
 # UI Inspector
 
-A lightweight Chrome Extension for frontend QA. Click any element on a page, log what's wrong and how to fix it, tag severity, and export a structured JSON report.
+A Chrome extension for frontend QA. Hover over any element on a page, click it, describe what's wrong, and export a structured report. Built for developers and QA engineers who want a faster way to document UI bugs without leaving the browser.
+
+## What it does
+
+- **Inspect mode** — hover to highlight elements, click to select
+- **Issue logging** — describe the bug, suggest a fix, pick a severity (Low / Medium / High / Critical)
+- **Screenshots** — auto-captures the selected element using html2canvas
+- **Computed styles** — shows font, color, spacing, dimensions, etc. for the selected element
+- **Sidebar panel** — lists all logged issues with expand/collapse detail view
+- **Export** — download issues as JSON or CSV
+- **Dark mode** — toggle from the popup, syncs across popup and page
+- **React support** — detects the nearest React component name via fiber traversal
+- **Persistent storage** — issues survive page reloads (stored in `chrome.storage.local`)
 
 ## Install
 
-1. Clone or download this repository
-2. Open `chrome://extensions/` in Chrome
-3. Enable **Developer mode** (top-right toggle)
-4. Click **Load unpacked** and select the project folder
-5. Pin the extension from the puzzle-piece icon in the toolbar
+1. Clone this repo:
+   ```
+   git clone https://github.com/neera-jk/ui-inspector.git
+   ```
+2. Open Chrome and go to `chrome://extensions/`
+3. Turn on **Developer mode** (toggle in the top right)
+4. Click **Load unpacked** → select the `ui-inspector` folder you just cloned
+5. Pin the extension from the puzzle-piece icon in the toolbar so it's easy to access
 
-## Usage
+That's it. No build step, no dependencies to install.
 
-1. Navigate to any webpage you want to inspect
-2. Click the **UI Inspector** icon in the toolbar
-3. Click **Start inspecting** — your cursor becomes a crosshair
-4. Hover over elements to highlight them, then click one to select it
-5. A modal appears — describe the issue, suggest a fix, and set severity (Low / Medium / High / Critical)
-6. Click **Save Issue** to log it
-7. Use **Export JSON** in the popup footer to download all issues as `ui-inspector-export.json`
-8. Use **Clear all** to reset
+## How to use
 
-The popup shows a live issue count and the 3 most recent issues. A dark/light theme toggle is in the header.
+1. Go to any webpage
+2. Click the **UI Inspector** icon in your toolbar
+3. Hit **Start inspecting** — your cursor turns into a crosshair
+4. Hover over elements to see them highlighted, click one to select it
+5. A modal pops up showing the element info (component name, selector, computed styles, screenshot)
+6. Fill in what's wrong and how to fix it, pick a severity, and hit **Save Issue**
+7. Open the **sidebar panel** (from the popup) to see all your logged issues
+8. Export as JSON or CSV when you're done
 
-## Tech Stack
+You can also use the console API on any page where the extension is active:
+- `inspectUI()` — start inspect mode
+- `toggleSidebar()` — open/close the sidebar
+- `viewIssues()` — print all issues to the console
+- `clearIssues()` — wipe everything
 
-- **Manifest V3** Chrome Extension
-- **Vanilla JS** — no frameworks or libraries
-- **CSS Variables** — light/dark theme with no flash on load
-- Content script with DOM event listeners for element selection
-- React Fiber traversal to detect component names (works on React apps)
+## Project structure
 
-## Coming Soon
+```
+manifest.json      — extension config (Manifest V3)
+content.js         — main content script (inspect, modal, sidebar, storage)
+content.css        — all injected styles (highlight, modal, sidebar, animations)
+popup.html         — extension popup markup
+popup.js           — popup logic (messaging, theme toggle)
+popup.css          — popup styles
+theme-init.js      — prevents dark mode flash on page load
+html2canvas.min.js — screenshot library (bundled, no CDN)
+```
 
-- Severity filtering in the issue list
-- Team export formats (Markdown, Linear import)
+## Built with
+
+Vanilla JS, CSS custom properties, Chrome Extension Manifest V3. No frameworks, no build tools.
