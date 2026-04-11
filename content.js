@@ -1,46 +1,55 @@
+/**
+ * UI Inspector — Content Script
+ *
+ * Injected into every page by the Chrome extension. Provides:
+ *  1. Inspect mode — hover to highlight elements, click to open issue modal
+ *  2. Issue modal — log a bug with description, severity, screenshot, computed styles
+ *  3. Sidebar panel — view, expand, and export all logged issues
+ *  4. Persistence — issues stored in chrome.storage.local (survives page reloads)
+ *  5. Message API — popup communicates via chrome.runtime messages
+ */
 (() => {
     "use strict";
 
+    // Prevent double injection (manifest + popup fallback can both inject)
     if (window.__uiInspectorLoaded) return;
     window.__uiInspectorLoaded = true;
 
+    /* ══════════════════════════════════════════════════════
+       State
+       ══════════════════════════════════════════════════════ */
+
     let isInspectMode = false;
     let issueList = [];
+
+    // Highlight overlay (used instead of modifying host element classes)
     let lastHighlighted = null;
-    let _highlightOverlay = null;
+    let highlightOverlay = null;
+
+    // Sidebar
     let isSidebarVisible = false;
     let sidebarEl = null;
-    let _sidebarClosing = false;
-    let _modalClosing = false;
+    let sidebarClosing = false;
 
-    // Loads any previously saved issues from chrome.storage.local, defaulting to an empty array
-    // On first run, migrates any issues from localStorage (per-origin) to chrome.storage.local
+    // Modal
+    let modalClosing = false;
+
+    /* ══════════════════════════════════════════════════════
+       Storage (chrome.storage.local)
+       ══════════════════════════════════════════════════════ */
+
+    /**
+     * Loads issues from chrome.storage.local into memory.
+     * On first run, migrates any leftover localStorage data.
+     */
     function loadIssues(callback) {
-        chrome.storage.local.get("ui-inspector-issues", function (result) {
+        chrome.storage.local.get("ui-inspector-issues", (result) => {
             try {
-                var data = result["ui-inspector-issues"];
+                const data = result["ui-inspector-issues"];
                 if (Array.isArray(data) && data.length > 0) {
                     issueList = data;
                 } else {
-                    // One-time migration from localStorage
-                    try {
-                        var raw = localStorage.getItem("ui-inspector-issues");
-                        if (raw) {
-                            var parsed = JSON.parse(raw);
-                            if (Array.isArray(parsed) && parsed.length > 0) {
-                                issueList = parsed;
-                                localStorage.removeItem("ui-inspector-issues");
-                                chrome.storage.local.set({ "ui-inspector-issues": issueList });
-                                console.log("[UI Inspector] Migrated", issueList.length, "issues from localStorage");
-                            } else {
-                                issueList = [];
-                            }
-                        } else {
-                            issueList = [];
-                        }
-                    } catch (e) {
-                        issueList = [];
-                    }
+                    migrateFromLocalStorage();
                 }
             } catch (e) {
                 issueList = [];
@@ -49,9 +58,27 @@
         });
     }
 
-    // Persists the current issueList array to chrome.storage.local
+    /** One-time migration: moves issues from localStorage → chrome.storage.local */
+    function migrateFromLocalStorage() {
+        try {
+            const raw = localStorage.getItem("ui-inspector-issues");
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    issueList = parsed;
+                    localStorage.removeItem("ui-inspector-issues");
+                    chrome.storage.local.set({ "ui-inspector-issues": issueList });
+                    console.log("[UI Inspector] Migrated", issueList.length, "issues from localStorage");
+                    return;
+                }
+            }
+        } catch (e) { /* ignore */ }
+        issueList = [];
+    }
+
+    /** Persists the in-memory issueList to chrome.storage.local */
     function saveIssues(callback) {
-        chrome.storage.local.set({ "ui-inspector-issues": issueList }, function () {
+        chrome.storage.local.set({ "ui-inspector-issues": issueList }, () => {
             if (chrome.runtime.lastError) {
                 console.warn("[UI Inspector] Failed to save issues:", chrome.runtime.lastError.message);
             }
@@ -59,59 +86,76 @@
         });
     }
 
-    // Walks up the React Fiber tree (up to 20 levels) to find the nearest component name.
-    // First checks for a data-component attribute, then looks for __reactFiber or __reactInternalInstance keys.
+    /** Clears all issues from memory and storage */
+    function clearIssues(callback) {
+        issueList = [];
+        chrome.storage.local.remove("ui-inspector-issues", () => {
+            console.log("[UI Inspector] All issues cleared.");
+            if (typeof callback === "function") callback();
+        });
+    }
+
+    /* ══════════════════════════════════════════════════════
+       Utilities
+       ══════════════════════════════════════════════════════ */
+
+    /** Escapes HTML special characters to prevent XSS when building innerHTML */
+    function escapeHtml(str) {
+        const div = document.createElement("div");
+        div.appendChild(document.createTextNode(str));
+        return div.innerHTML;
+    }
+
+    /** Triggers a file download in the browser */
+    function downloadFile(content, filename, type) {
+        const blob = new Blob([content], { type });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    /* ══════════════════════════════════════════════════════
+       Element Analysis
+       ══════════════════════════════════════════════════════ */
+
+    /** CSS properties captured for each inspected element */
+    const STYLE_PROPS = [
+        "font-size", "font-weight", "color", "background-color",
+        "border", "border-radius", "padding", "margin",
+        "opacity", "box-shadow", "width", "height",
+        "display", "line-height", "letter-spacing",
+    ];
+
+    /**
+     * Finds the nearest React component name for an element.
+     * Checks data-component attribute first, then React fiber internals.
+     */
     function findComponentInfo(element) {
         if (!element) return "Unknown";
 
-        // Check data-component attribute first
+        // 1. Check data-component attribute
         const dataComp = element.getAttribute && element.getAttribute("data-component");
         if (dataComp) return dataComp;
 
-        // Look for React fiber key on the element
-        const fiberKey = Object.keys(element).find(
-            (key) => key.startsWith("__reactFiber") || key.startsWith("__reactInternalInstance")
-        );
+        // 2. Check React fiber on the element itself
+        const name = getReactComponentName(element);
+        if (name) return name;
 
-        if (fiberKey) {
-            let fiber = element[fiberKey];
-            let depth = 0;
-            while (fiber && depth < 20) {
-                if (fiber.elementType && typeof fiber.elementType.name === "string") {
-                    return fiber.elementType.name;
-                }
-                if (fiber.type && typeof fiber.type.name === "string") {
-                    return fiber.type.name;
-                }
-                fiber = fiber.return;
-                depth++;
-            }
-        }
-
-        // Walk up ancestors and check for data-component or fiber
+        // 3. Walk up ancestors looking for data-component or fiber
         let ancestor = element.parentElement;
         let levels = 0;
         while (ancestor && levels < 20) {
             const ancestorData = ancestor.getAttribute && ancestor.getAttribute("data-component");
             if (ancestorData) return ancestorData;
 
-            const ancestorFiberKey = Object.keys(ancestor).find(
-                (key) => key.startsWith("__reactFiber") || key.startsWith("__reactInternalInstance")
-            );
-            if (ancestorFiberKey) {
-                let fiber = ancestor[ancestorFiberKey];
-                let depth = 0;
-                while (fiber && depth < 20) {
-                    if (fiber.elementType && typeof fiber.elementType.name === "string") {
-                        return fiber.elementType.name;
-                    }
-                    if (fiber.type && typeof fiber.type.name === "string") {
-                        return fiber.type.name;
-                    }
-                    fiber = fiber.return;
-                    depth++;
-                }
-            }
+            const ancestorName = getReactComponentName(ancestor);
+            if (ancestorName) return ancestorName;
+
             ancestor = ancestor.parentElement;
             levels++;
         }
@@ -119,120 +163,103 @@
         return "Unknown";
     }
 
-    // Builds a 3-level parent hierarchy string (e.g. "section.main > div.container > article.card")
+    /** Extracts the React component name from an element's fiber, if present */
+    function getReactComponentName(el) {
+        const fiberKey = Object.keys(el).find(
+            (key) => key.startsWith("__reactFiber") || key.startsWith("__reactInternalInstance")
+        );
+        if (!fiberKey) return null;
+
+        let fiber = el[fiberKey];
+        let depth = 0;
+        while (fiber && depth < 20) {
+            if (fiber.elementType && typeof fiber.elementType.name === "string") {
+                return fiber.elementType.name;
+            }
+            if (fiber.type && typeof fiber.type.name === "string") {
+                return fiber.type.name;
+            }
+            fiber = fiber.return;
+            depth++;
+        }
+        return null;
+    }
+
+    /**
+     * Builds a 3-level parent hierarchy string in outside-in order.
+     * Example: "section.main > div.container > article.card"
+     */
     function getParentHierarchy(element) {
         const parts = [];
         let current = element.parentElement;
         let levels = 0;
         while (current && levels < 3 && current !== document.body && current !== document.documentElement) {
             const tag = current.tagName.toLowerCase();
-            const firstClass = current.classList && current.classList.length > 0 ? "." + current.classList[0] : "";
-            parts.push(tag + firstClass);
+            const cls = current.classList && current.classList.length > 0 ? "." + current.classList[0] : "";
+            parts.push(tag + cls);
             current = current.parentElement;
             levels++;
         }
         return parts.reverse().join(" > ");
     }
 
-    // Builds a unique CSS selector path from the element up to body
+    /**
+     * Builds a unique CSS selector path from the element up to the nearest ID or body.
+     * Uses CSS.escape() to handle special characters in IDs and class names.
+     */
     function getCssSelector(element) {
         if (!element || element === document.body || element === document.documentElement) return "";
-        var segments = [];
-        var current = element;
-        var depth = 0;
+        const segments = [];
+        let current = element;
+        let depth = 0;
+
         while (current && current !== document.body && current !== document.documentElement && depth < 10) {
             if (current.id) {
                 segments.push("#" + CSS.escape(current.id));
                 break;
             }
-            var tag = current.tagName.toLowerCase();
-            var firstClass = current.classList && current.classList.length > 0 ? "." + CSS.escape(current.classList[0]) : "";
-            var nth = "";
+            const tag = current.tagName.toLowerCase();
+            const cls = current.classList && current.classList.length > 0
+                ? "." + CSS.escape(current.classList[0])
+                : "";
+            let nth = "";
             if (current.parentElement) {
-                var idx = Array.from(current.parentElement.children).indexOf(current) + 1;
+                const idx = Array.from(current.parentElement.children).indexOf(current) + 1;
                 nth = ":nth-child(" + idx + ")";
             }
-            segments.push(tag + firstClass + nth);
+            segments.push(tag + cls + nth);
             current = current.parentElement;
             depth++;
         }
         return segments.reverse().join(" > ");
     }
 
-    // Handles mouseover during inspect mode: highlights the hovered element with an overlay
-    function onMouseOver(e) {
-        const target = e.target;
-        if (target === document.body || target === document.documentElement) return;
-
-        if (lastHighlighted === target) return;
-        lastHighlighted = target;
-        _showHighlightOverlay(target);
-    }
-
-    // Handles mouseout during inspect mode: removes the highlight overlay
-    function onMouseOut(e) {
-        if (lastHighlighted === e.target) {
-            lastHighlighted = null;
-            _removeHighlightOverlay();
-        }
-    }
-
-    function _showHighlightOverlay(el) {
-        _removeHighlightOverlay();
-        var rect = el.getBoundingClientRect();
-        var overlay = document.createElement("div");
-        overlay.className = "ui-inspector-highlight";
-        overlay.style.cssText = "position:fixed;pointer-events:none;z-index:2147483646;"
-            + "top:" + rect.top + "px;left:" + rect.left + "px;"
-            + "width:" + rect.width + "px;height:" + rect.height + "px;";
-        document.body.appendChild(overlay);
-        _highlightOverlay = overlay;
-    }
-
-    function _removeHighlightOverlay() {
-        if (_highlightOverlay && _highlightOverlay.parentNode) {
-            _highlightOverlay.parentNode.removeChild(_highlightOverlay);
-        }
-        _highlightOverlay = null;
-    }
-
-    // Handles click during inspect mode: prevents default behavior, collects element data, and opens the issue modal
-    function onClick(e) {
-        e.preventDefault();
-        e.stopPropagation();
-
-        const element = e.target;
-
-        // Remove highlight from clicked element
-        if (lastHighlighted) {
-            lastHighlighted = null;
-            _removeHighlightOverlay();
-        }
-
-        const componentName = findComponentInfo(element);
-
-        const STYLE_PROPS = ["font-size", "font-weight", "color", "background-color", "border", "border-radius", "padding", "margin", "opacity", "box-shadow", "width", "height", "display", "line-height", "letter-spacing"];
+    /**
+     * Collects all relevant data about the clicked element:
+     * tag, classes, ID, text, page, hierarchy, component, selector, and computed styles.
+     */
+    function collectElementData(element) {
         const computed = window.getComputedStyle(element);
         const computedStyles = {};
-        STYLE_PROPS.forEach(function (p) { computedStyles[p] = computed.getPropertyValue(p); });
+        STYLE_PROPS.forEach((p) => { computedStyles[p] = computed.getPropertyValue(p); });
 
-        const elementData = {
+        return {
             tagName: element.tagName.toLowerCase(),
             id: element.id || "",
             className: element.getAttribute("class") || "",
             innerText: (element.innerText || "").substring(0, 50),
             page: window.location.pathname,
             hierarchy: getParentHierarchy(element),
-            component: componentName,
+            component: findComponentInfo(element),
             selector: getCssSelector(element),
-            computedStyles: computedStyles,
+            computedStyles,
         };
-
-        disableInspectMode();
-        showInspectorModal(elementData, element);
     }
 
-    // Enables inspect mode by attaching mouseover, mouseout, and click listeners to the document
+    /* ══════════════════════════════════════════════════════
+       Inspect Mode (hover highlight + click to log)
+       ══════════════════════════════════════════════════════ */
+
     function enableInspectMode() {
         isInspectMode = true;
         document.addEventListener("mouseover", onMouseOver, false);
@@ -241,21 +268,78 @@
         document.body.style.cursor = "crosshair";
     }
 
-    // Disables inspect mode by removing all event listeners and resetting cursor
     function disableInspectMode() {
         isInspectMode = false;
         document.removeEventListener("mouseover", onMouseOver, false);
         document.removeEventListener("mouseout", onMouseOut, false);
         document.removeEventListener("click", onClick, true);
         document.body.style.cursor = "";
+        clearHighlight();
+    }
 
-        if (lastHighlighted) {
-            lastHighlighted = null;
-            _removeHighlightOverlay();
+    /** Shows a red overlay on the hovered element (without modifying its DOM classes) */
+    function onMouseOver(e) {
+        const target = e.target;
+        if (target === document.body || target === document.documentElement) return;
+        if (lastHighlighted === target) return;
+
+        lastHighlighted = target;
+        showHighlightOverlay(target);
+    }
+
+    /** Removes the highlight when the cursor leaves the element */
+    function onMouseOut(e) {
+        if (lastHighlighted === e.target) {
+            clearHighlight();
         }
     }
 
-    // Injects a modal overlay into the page for logging a new issue against the selected element
+    /** Creates a positioned overlay div that visually highlights the target element */
+    function showHighlightOverlay(el) {
+        removeHighlightOverlay();
+        const rect = el.getBoundingClientRect();
+        const overlay = document.createElement("div");
+        overlay.className = "ui-inspector-highlight";
+        overlay.style.cssText =
+            "position:fixed;pointer-events:none;z-index:2147483646;"
+            + "top:" + rect.top + "px;left:" + rect.left + "px;"
+            + "width:" + rect.width + "px;height:" + rect.height + "px;";
+        document.body.appendChild(overlay);
+        highlightOverlay = overlay;
+    }
+
+    /** Removes the highlight overlay from the DOM */
+    function removeHighlightOverlay() {
+        if (highlightOverlay && highlightOverlay.parentNode) {
+            highlightOverlay.parentNode.removeChild(highlightOverlay);
+        }
+        highlightOverlay = null;
+    }
+
+    /** Clears both the tracked element reference and the overlay */
+    function clearHighlight() {
+        lastHighlighted = null;
+        removeHighlightOverlay();
+    }
+
+    /** Handles click during inspect mode: collects element data and opens the issue modal */
+    function onClick(e) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const element = e.target;
+        clearHighlight();
+
+        const elementData = collectElementData(element);
+        disableInspectMode();
+        showInspectorModal(elementData, element);
+    }
+
+    /* ══════════════════════════════════════════════════════
+       Issue Modal
+       ══════════════════════════════════════════════════════ */
+
+    /** Creates the modal backdrop, applies theme, and delegates to the builder */
     function showInspectorModal(elementData, targetElement) {
         const backdrop = document.createElement("div");
         backdrop.className = "ui-inspector-modal";
@@ -267,57 +351,67 @@
             if (result["ui-inspector-theme"] === "dark") {
                 backdrop.setAttribute("data-theme", "dark");
             }
-            _buildAndMountModal(backdrop, elementData, targetElement);
+            buildAndMountModal(backdrop, elementData, targetElement);
         });
     }
 
-    function _buildAndMountModal(backdrop, elementData, targetElement) {
+    /** Builds all modal content, wires up event handlers, and appends to the DOM */
+    function buildAndMountModal(backdrop, elementData, targetElement) {
         let selectedSeverity = "Medium";
 
+        // ── Modal HTML ──
         backdrop.innerHTML = `
-      <div class="ui-inspector-card">
-        <div class="ui-inspector-header">
-          <h2 id="ui-inspector-modal-title">Log Issue</h2>
-          <button class="ui-inspector-close-btn" data-action="close">✕</button>
-        </div>
-        <div class="ui-inspector-info">
-          <span><strong>Component:</strong> ${escapeHtml(elementData.component)}</span>
-          <span><strong>Page:</strong> ${escapeHtml(elementData.page)}</span>
-          <span><strong>Element:</strong> &lt;${escapeHtml(elementData.tagName)}&gt;</span>
-          <span><strong>Selector:</strong> <code style="font-size:11px;word-break:break-all;">${escapeHtml(elementData.selector)}</code></span>
-          <div id="ui-inspector-screenshot-wrap" style="margin-top:8px;"></div>
-        </div>
-        <details class="ui-inspector-styles-details">
-          <summary class="ui-inspector-styles-summary">Computed Styles</summary>
-          <div class="ui-inspector-styles-grid" id="ui-inspector-styles-grid"></div>
-        </details>
-        <label class="ui-inspector-label">What is wrong?</label>
-        <textarea class="ui-inspector-textarea" id="ui-inspector-what" placeholder="Describe the issue..."></textarea>
-        <label class="ui-inspector-label">How should this be fixed?</label>
-        <textarea class="ui-inspector-textarea" id="ui-inspector-how" placeholder="Describe the fix..."></textarea>
-        <label class="ui-inspector-label">Severity</label>
-        <div class="ui-inspector-severity-row">
-          <button class="ui-inspector-severity-btn" data-severity="Low"><span>Low</span><span></span></button>
-          <button class="ui-inspector-severity-btn selected-medium" data-severity="Medium"><span>Medium</span><span></span></button>
-          <button class="ui-inspector-severity-btn" data-severity="High"><span>High</span><span></span></button>
-          <button class="ui-inspector-severity-btn" data-severity="Critical"><span>Critical</span><span></span></button>
-        </div>
-        <button class="ui-inspector-save-btn" data-action="save">Save Issue</button>
-      </div>
-    `;
+            <div class="ui-inspector-card">
+                <div class="ui-inspector-header">
+                    <h2 id="ui-inspector-modal-title">Log Issue</h2>
+                    <button class="ui-inspector-close-btn" data-action="close">\u2715</button>
+                </div>
 
-        // Populate computed styles grid
+                <div class="ui-inspector-info">
+                    <span><strong>Component:</strong> ${escapeHtml(elementData.component)}</span>
+                    <span><strong>Page:</strong> ${escapeHtml(elementData.page)}</span>
+                    <span><strong>Element:</strong> &lt;${escapeHtml(elementData.tagName)}&gt;</span>
+                    <span><strong>Selector:</strong> <code style="font-size:11px;word-break:break-all;">${escapeHtml(elementData.selector)}</code></span>
+                    <div id="ui-inspector-screenshot-wrap" style="margin-top:8px;"></div>
+                </div>
+
+                <details class="ui-inspector-styles-details">
+                    <summary class="ui-inspector-styles-summary">Computed Styles</summary>
+                    <div class="ui-inspector-styles-grid" id="ui-inspector-styles-grid"></div>
+                </details>
+
+                <label class="ui-inspector-label">What is wrong?</label>
+                <textarea class="ui-inspector-textarea" id="ui-inspector-what" placeholder="Describe the issue..."></textarea>
+
+                <label class="ui-inspector-label">How should this be fixed?</label>
+                <textarea class="ui-inspector-textarea" id="ui-inspector-how" placeholder="Describe the fix..."></textarea>
+
+                <label class="ui-inspector-label">Severity</label>
+                <div class="ui-inspector-severity-row">
+                    <button class="ui-inspector-severity-btn" data-severity="Low"><span>Low</span><span></span></button>
+                    <button class="ui-inspector-severity-btn selected-medium" data-severity="Medium"><span>Medium</span><span></span></button>
+                    <button class="ui-inspector-severity-btn" data-severity="High"><span>High</span><span></span></button>
+                    <button class="ui-inspector-severity-btn" data-severity="Critical"><span>Critical</span><span></span></button>
+                </div>
+
+                <button class="ui-inspector-save-btn" data-action="save">Save Issue</button>
+            </div>
+        `;
+
+        // ── Populate computed styles grid ──
         const stylesGrid = backdrop.querySelector("#ui-inspector-styles-grid");
         if (stylesGrid && elementData.computedStyles) {
-            Object.entries(elementData.computedStyles).forEach(function ([prop, val]) {
+            Object.entries(elementData.computedStyles).forEach(([prop, val]) => {
                 const row = document.createElement("div");
                 row.className = "ui-inspector-styles-row";
-                row.innerHTML = '<span class="ui-inspector-styles-prop">' + escapeHtml(prop) + '</span><span class="ui-inspector-styles-val">' + escapeHtml(val) + '</span>';
+                row.innerHTML =
+                    '<span class="ui-inspector-styles-prop">' + escapeHtml(prop) + '</span>'
+                    + '<span class="ui-inspector-styles-val">' + escapeHtml(val) + '</span>';
                 stylesGrid.appendChild(row);
             });
         }
 
-        // Handle severity button selection — only one can be active at a time
+        // ── Severity selection (only one active at a time) ──
         const severityRow = backdrop.querySelector(".ui-inspector-severity-row");
         severityRow.addEventListener("click", (e) => {
             const btn = e.target.closest("[data-severity]");
@@ -329,83 +423,73 @@
             btn.classList.add("selected-" + selectedSeverity.toLowerCase());
         });
 
-        // Removes the modal from the DOM and re-enables inspect mode
+        // ── Close modal (with animated exit) ──
         function closeModal() {
-            if (_modalClosing) return;
-            var whatVal = (backdrop.querySelector("#ui-inspector-what") || {}).value || "";
-            var howVal = (backdrop.querySelector("#ui-inspector-how") || {}).value || "";
+            if (modalClosing) return;
+
+            // Confirm if user has typed something
+            const whatVal = (backdrop.querySelector("#ui-inspector-what") || {}).value || "";
+            const howVal = (backdrop.querySelector("#ui-inspector-how") || {}).value || "";
             if (whatVal.trim() || howVal.trim()) {
                 if (!confirm("You have unsaved changes. Discard this issue?")) return;
             }
-            _modalClosing = true;
-            var card = backdrop.querySelector(".ui-inspector-card");
+
+            modalClosing = true;
+            const card = backdrop.querySelector(".ui-inspector-card");
             if (card) card.style.animation = "uiModalCardOut 0.25s ease forwards";
             backdrop.style.animation = "uiModalBackdropOut 0.25s ease forwards";
-            setTimeout(function () {
-                _modalClosing = false;
+
+            setTimeout(() => {
+                modalClosing = false;
                 document.removeEventListener("keydown", onKeyDown, true);
                 if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
                 enableInspectMode();
             }, 250);
         }
 
-        // Close button handler
-        backdrop.querySelector("[data-action='close']").addEventListener("click", closeModal);
-
-        // Escape key handler
+        // ── Keyboard: Escape to close, Tab to trap focus ──
         function onKeyDown(e) {
             if (e.key === "Escape") {
                 closeModal();
                 return;
             }
-            // Focus trap: keep Tab/Shift+Tab within the modal card
             if (e.key === "Tab") {
-                var card = backdrop.querySelector(".ui-inspector-card");
+                const card = backdrop.querySelector(".ui-inspector-card");
                 if (!card) return;
-                var focusable = card.querySelectorAll('button, textarea, input, [tabindex]:not([tabindex="-1"])');
+                const focusable = card.querySelectorAll('button, textarea, input, [tabindex]:not([tabindex="-1"])');
                 if (focusable.length === 0) return;
-                var first = focusable[0];
-                var last = focusable[focusable.length - 1];
-                if (e.shiftKey) {
-                    if (document.activeElement === first) {
-                        e.preventDefault();
-                        last.focus();
-                    }
-                } else {
-                    if (document.activeElement === last) {
-                        e.preventDefault();
-                        first.focus();
-                    }
+                const first = focusable[0];
+                const last = focusable[focusable.length - 1];
+
+                if (e.shiftKey && document.activeElement === first) {
+                    e.preventDefault();
+                    last.focus();
+                } else if (!e.shiftKey && document.activeElement === last) {
+                    e.preventDefault();
+                    first.focus();
                 }
             }
         }
         document.addEventListener("keydown", onKeyDown, true);
 
-        // Clicking the backdrop (outside the card) closes the modal
+        // ── Close handlers ──
+        backdrop.querySelector("[data-action='close']").addEventListener("click", closeModal);
         backdrop.addEventListener("click", (e) => {
-            if (e.target === backdrop) {
-                closeModal();
-            }
+            if (e.target === backdrop) closeModal();
         });
 
-        // Save button handler — validates inputs, builds the issue object, and persists it
+        // ── Save issue ──
         backdrop.querySelector("[data-action='save']").addEventListener("click", () => {
             const whatField = backdrop.querySelector("#ui-inspector-what");
             const howField = backdrop.querySelector("#ui-inspector-how");
             const whatValue = whatField.value.trim();
             const howValue = howField.value.trim();
 
-            if (!whatValue) {
-                whatField.style.borderColor = "#ef4444";
-                whatField.focus();
-                return;
-            }
-            if (!howValue) {
-                howField.style.borderColor = "#ef4444";
-                howField.focus();
-                return;
-            }
+            // Validate required fields
+            if (!whatValue) { whatField.style.borderColor = "#ef4444"; whatField.focus(); return; }
+            if (!howValue) { howField.style.borderColor = "#ef4444"; howField.focus(); return; }
 
+            // Build the issue object
             const issue = {
                 id: crypto.randomUUID(),
                 component: elementData.component,
@@ -427,12 +511,14 @@
             issueList.push(issue);
             saveIssues();
 
-            _modalClosing = true;
-            var card = backdrop.querySelector(".ui-inspector-card");
+            // Animate out and clean up
+            modalClosing = true;
+            const card = backdrop.querySelector(".ui-inspector-card");
             if (card) card.style.animation = "uiModalCardOut 0.25s ease forwards";
             backdrop.style.animation = "uiModalBackdropOut 0.25s ease forwards";
-            setTimeout(function () {
-                _modalClosing = false;
+
+            setTimeout(() => {
+                modalClosing = false;
                 document.removeEventListener("keydown", onKeyDown, true);
                 if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
                 renderSidebarIssues();
@@ -440,38 +526,47 @@
             }, 250);
         });
 
+        // ── Mount modal ──
         document.body.appendChild(backdrop);
 
-        // Capture screenshot of the target element (skip if element is very large)
+        // ── Screenshot capture (skips elements larger than 2000x2000) ──
         if (targetElement && typeof html2canvas === "function") {
-            var rect = targetElement.getBoundingClientRect();
+            const rect = targetElement.getBoundingClientRect();
+
             if (rect.width > 2000 || rect.height > 2000) {
-                console.warn("[UI Inspector] Element too large for screenshot ("
-                    + Math.round(rect.width) + "x" + Math.round(rect.height)
-                    + "), skipping capture.");
+                console.warn(
+                    "[UI Inspector] Element too large for screenshot ("
+                    + Math.round(rect.width) + "\u00d7" + Math.round(rect.height)
+                    + "), skipping capture."
+                );
             } else {
-                html2canvas(targetElement, { scale: 1, useCORS: true, logging: false }).then(function (canvas) {
-                    var dataUrl = canvas.toDataURL("image/png");
-                    backdrop.__screenshotDataUrl = dataUrl;
-                    var wrap = backdrop.querySelector("#ui-inspector-screenshot-wrap");
-                    if (wrap) {
-                        var img = document.createElement("img");
-                        img.src = dataUrl;
-                        img.style.cssText = "max-width:100%;border-radius:6px;border:1px solid var(--ui-border);margin-top:4px;";
-                        wrap.appendChild(img);
-                    }
-                }).catch(function (err) {
-                    console.warn("[UI Inspector] Screenshot capture failed:", err.message || err);
-                });
+                html2canvas(targetElement, { scale: 1, useCORS: true, logging: false })
+                    .then((canvas) => {
+                        const dataUrl = canvas.toDataURL("image/png");
+                        backdrop.__screenshotDataUrl = dataUrl;
+                        const wrap = backdrop.querySelector("#ui-inspector-screenshot-wrap");
+                        if (wrap) {
+                            const img = document.createElement("img");
+                            img.src = dataUrl;
+                            img.style.cssText = "max-width:100%;border-radius:6px;border:1px solid var(--ui-border);margin-top:4px;";
+                            wrap.appendChild(img);
+                        }
+                    })
+                    .catch((err) => {
+                        console.warn("[UI Inspector] Screenshot capture failed:", err.message || err);
+                    });
             }
         }
     }
 
-    // ── Sidebar ──
+    /* ══════════════════════════════════════════════════════
+       Sidebar Panel
+       ══════════════════════════════════════════════════════ */
 
     function showSidebar() {
-        if (sidebarEl || _sidebarClosing) return;
+        if (sidebarEl || sidebarClosing) return;
         isSidebarVisible = true;
+
         sidebarEl = document.createElement("div");
         sidebarEl.className = "ui-inspector-sidebar";
         sidebarEl.setAttribute("role", "complementary");
@@ -481,34 +576,39 @@
             if (result["ui-inspector-theme"] === "dark") {
                 sidebarEl.setAttribute("data-theme", "dark");
             }
+
             sidebarEl.innerHTML =
-                '<div class="ui-inspector-sb-header">' +
-                '<span class="ui-inspector-sb-title">UI Inspector</span>' +
-                '<span class="ui-inspector-sb-count" id="ui-inspector-sb-count">' + issueList.length + ' issues</span>' +
-                '<button class="ui-inspector-sb-close" id="ui-inspector-sb-close">\u2715</button>' +
-                '</div>' +
-                '<div class="ui-inspector-sb-body" id="ui-inspector-sb-body"></div>' +
-                '<div class="ui-inspector-sb-footer">' +
-                '<button class="ui-inspector-sb-footer-btn" id="ui-inspector-sb-json">JSON</button>' +
-                '<button class="ui-inspector-sb-footer-btn" id="ui-inspector-sb-csv">CSV</button>' +
-                '<button class="ui-inspector-sb-footer-btn" id="ui-inspector-sb-clear">Clear</button>' +
-                '</div>';
+                '<div class="ui-inspector-sb-header">'
+                +   '<span class="ui-inspector-sb-title">UI Inspector</span>'
+                +   '<span class="ui-inspector-sb-count" id="ui-inspector-sb-count">'
+                +       issueList.length + " issues"
+                +   '</span>'
+                +   '<button class="ui-inspector-sb-close" id="ui-inspector-sb-close">\u2715</button>'
+                + '</div>'
+                + '<div class="ui-inspector-sb-body" id="ui-inspector-sb-body"></div>'
+                + '<div class="ui-inspector-sb-footer">'
+                +   '<button class="ui-inspector-sb-footer-btn" id="ui-inspector-sb-json">JSON</button>'
+                +   '<button class="ui-inspector-sb-footer-btn" id="ui-inspector-sb-csv">CSV</button>'
+                +   '<button class="ui-inspector-sb-footer-btn" id="ui-inspector-sb-clear">Clear</button>'
+                + '</div>';
 
             document.body.appendChild(sidebarEl);
             renderSidebarIssues();
 
+            // ── Sidebar event handlers ──
+
             sidebarEl.querySelector("#ui-inspector-sb-close").addEventListener("click", hideSidebar);
 
-            sidebarEl.querySelector("#ui-inspector-sb-json").addEventListener("click", function () {
+            sidebarEl.querySelector("#ui-inspector-sb-json").addEventListener("click", () => {
                 downloadFile(JSON.stringify(issueList, null, 2), "ui-inspector-export.json", "application/json");
             });
 
-            sidebarEl.querySelector("#ui-inspector-sb-csv").addEventListener("click", function () {
-                var headers = ["id", "severity", "whatIsWrong", "howToFix", "component", "page", "element", "timestamp"];
-                var rows = [headers.join(",")];
-                issueList.forEach(function (issue) {
-                    var row = headers.map(function (h) {
-                        var val = (issue[h] || "").toString().replace(/"/g, '""');
+            sidebarEl.querySelector("#ui-inspector-sb-csv").addEventListener("click", () => {
+                const headers = ["id", "severity", "whatIsWrong", "howToFix", "component", "page", "element", "timestamp"];
+                const rows = [headers.join(",")];
+                issueList.forEach((issue) => {
+                    const row = headers.map((h) => {
+                        const val = (issue[h] || "").toString().replace(/"/g, '""');
                         return '"' + val + '"';
                     });
                     rows.push(row.join(","));
@@ -516,7 +616,7 @@
                 downloadFile(rows.join("\n"), "ui-inspector-export.csv", "text/csv");
             });
 
-            sidebarEl.querySelector("#ui-inspector-sb-clear").addEventListener("click", function () {
+            sidebarEl.querySelector("#ui-inspector-sb-clear").addEventListener("click", () => {
                 if (!confirm("Clear all issues? This cannot be undone.")) return;
                 clearIssues();
                 renderSidebarIssues();
@@ -525,32 +625,30 @@
     }
 
     function hideSidebar() {
-        if (_sidebarClosing) return;
+        if (sidebarClosing) return;
         isSidebarVisible = false;
+
         if (sidebarEl) {
-            _sidebarClosing = true;
+            sidebarClosing = true;
             sidebarEl.style.animation = "uiSidebarSlideOut 0.25s ease forwards";
-            var el = sidebarEl;
-            setTimeout(function () {
+            const el = sidebarEl;
+            setTimeout(() => {
                 if (el && el.parentNode) el.parentNode.removeChild(el);
-                _sidebarClosing = false;
+                sidebarClosing = false;
             }, 250);
         }
         sidebarEl = null;
     }
 
     function toggleSidebar() {
-        if (isSidebarVisible) {
-            hideSidebar();
-        } else {
-            showSidebar();
-        }
+        isSidebarVisible ? hideSidebar() : showSidebar();
     }
 
+    /** Re-renders all issue cards in the sidebar body */
     function renderSidebarIssues() {
         if (!sidebarEl) return;
-        var body = sidebarEl.querySelector("#ui-inspector-sb-body");
-        var countEl = sidebarEl.querySelector("#ui-inspector-sb-count");
+        const body = sidebarEl.querySelector("#ui-inspector-sb-body");
+        const countEl = sidebarEl.querySelector("#ui-inspector-sb-count");
         if (!body) return;
 
         countEl.textContent = issueList.length + " issue" + (issueList.length !== 1 ? "s" : "");
@@ -561,59 +659,65 @@
         }
 
         body.innerHTML = "";
-        issueList.slice().reverse().forEach(function (issue) {
-            var card = document.createElement("div");
+        issueList.slice().reverse().forEach((issue) => {
+            const card = document.createElement("div");
             card.className = "ui-inspector-sb-card";
 
-            var sevClass = (issue.severity || "medium").toLowerCase();
-            var ts = issue.timestamp ? new Date(issue.timestamp).toLocaleString() : "";
+            const sevClass = (issue.severity || "medium").toLowerCase();
+            const ts = issue.timestamp ? new Date(issue.timestamp).toLocaleString() : "";
 
-            card.innerHTML =
-                '<div class="ui-inspector-sb-card-top">' +
-                '<span class="ui-inspector-sb-dot ui-inspector-sb-dot-' + escapeHtml(sevClass) + '"></span>' +
-                '<span class="ui-inspector-sb-card-title">' + escapeHtml(issue.whatIsWrong || "Untitled") + '</span>' +
-                '<span class="ui-inspector-sb-card-chevron">\u203A</span>' +
-                '</div>' +
-                '<div class="ui-inspector-sb-card-meta">' + escapeHtml(issue.component || "Unknown") + ' \u00b7 ' + escapeHtml(issue.page || "/") + '</div>' +
-                '<div class="ui-inspector-sb-card-detail">' +
-                '<div><strong>What:</strong> ' + escapeHtml(issue.whatIsWrong || "") + '</div>' +
-                '<div><strong>Fix:</strong> ' + escapeHtml(issue.howToFix || "") + '</div>' +
-                '<div><strong>Element:</strong> &lt;' + escapeHtml(issue.element || "") + '&gt;</div>' +
-                '<div><strong>Selector:</strong> <code style="font-size:11px;word-break:break-all;">' + escapeHtml(issue.selector || "") + '</code></div>' +
-                (issue.computedStyles ? '<div style="margin-top:6px;"><strong>Styles:</strong><div style="font-size:11px;font-family:monospace;margin-top:4px;line-height:1.8;">' + Object.entries(issue.computedStyles).map(function ([p, v]) { return escapeHtml(p) + ': ' + escapeHtml(v); }).join('<br>') + '</div></div>' : '') +
-                (issue.screenshot ? '<div style="margin-top:8px;"><img src="' + escapeHtml(issue.screenshot) + '" style="max-width:100%;border-radius:6px;border:1px solid #e5e7eb;" /></div>' : '') +
-                '<div><strong>Time:</strong> ' + escapeHtml(ts) + '</div>' +
-                '</div>';
+            // Card summary (always visible)
+            const summaryHtml =
+                '<div class="ui-inspector-sb-card-top">'
+                +   '<span class="ui-inspector-sb-dot ui-inspector-sb-dot-' + escapeHtml(sevClass) + '"></span>'
+                +   '<span class="ui-inspector-sb-card-title">' + escapeHtml(issue.whatIsWrong || "Untitled") + '</span>'
+                +   '<span class="ui-inspector-sb-card-chevron">\u203A</span>'
+                + '</div>'
+                + '<div class="ui-inspector-sb-card-meta">'
+                +   escapeHtml(issue.component || "Unknown") + " \u00b7 " + escapeHtml(issue.page || "/")
+                + '</div>';
 
-            card.querySelector(".ui-inspector-sb-card-top").addEventListener("click", function () {
+            // Card detail (shown on expand)
+            let detailHtml =
+                '<div class="ui-inspector-sb-card-detail">'
+                +   '<div><strong>What:</strong> ' + escapeHtml(issue.whatIsWrong || "") + '</div>'
+                +   '<div><strong>Fix:</strong> ' + escapeHtml(issue.howToFix || "") + '</div>'
+                +   '<div><strong>Element:</strong> &lt;' + escapeHtml(issue.element || "") + '&gt;</div>'
+                +   '<div><strong>Selector:</strong> <code style="font-size:11px;word-break:break-all;">'
+                +       escapeHtml(issue.selector || "")
+                +   '</code></div>';
+
+            if (issue.computedStyles) {
+                const styleLines = Object.entries(issue.computedStyles)
+                    .map(([p, v]) => escapeHtml(p) + ": " + escapeHtml(v))
+                    .join("<br>");
+                detailHtml +=
+                    '<div style="margin-top:6px;"><strong>Styles:</strong>'
+                    + '<div style="font-size:11px;font-family:monospace;margin-top:4px;line-height:1.8;">'
+                    + styleLines + '</div></div>';
+            }
+
+            if (issue.screenshot) {
+                detailHtml +=
+                    '<div style="margin-top:8px;"><img src="' + escapeHtml(issue.screenshot)
+                    + '" style="max-width:100%;border-radius:6px;border:1px solid #e5e7eb;" /></div>';
+            }
+
+            detailHtml += '<div><strong>Time:</strong> ' + escapeHtml(ts) + '</div></div>';
+
+            card.innerHTML = summaryHtml + detailHtml;
+            card.querySelector(".ui-inspector-sb-card-top").addEventListener("click", () => {
                 card.classList.toggle("expanded");
             });
-
             body.appendChild(card);
         });
-
     }
 
-    function downloadFile(content, filename, type) {
-        var blob = new Blob([content], { type: type });
-        var url = URL.createObjectURL(blob);
-        var a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-    }
+    /* ══════════════════════════════════════════════════════
+       Console API
+       ══════════════════════════════════════════════════════ */
 
-    // Escapes HTML special characters to prevent injection when rendering element data in the modal
-    function escapeHtml(str) {
-        const div = document.createElement("div");
-        div.appendChild(document.createTextNode(str));
-        return div.innerHTML;
-    }
-
-    // Prints all logged issues to the console in a readable table format
+    /** Prints all logged issues to the console */
     function viewIssues() {
         if (issueList.length === 0) {
             console.log("[UI Inspector] No issues logged.");
@@ -623,71 +727,77 @@
         return issueList;
     }
 
-    // Clears all logged issues from memory and chrome.storage.local
-    function clearIssues(callback) {
-        issueList = [];
-        chrome.storage.local.remove("ui-inspector-issues", function () {
-            console.log("[UI Inspector] All issues cleared.");
-            if (typeof callback === "function") callback();
-        });
-    }
-
-    // Expose viewIssues and clearIssues on window for console access
     window.viewIssues = viewIssues;
     window.clearIssues = clearIssues;
     window.inspectUI = enableInspectMode;
     window.toggleSidebar = toggleSidebar;
 
-    // Listen for theme changes and update open sidebar/modal in real time
-    chrome.storage.onChanged.addListener(function (changes, area) {
-        if (area === "local" && changes["ui-inspector-theme"]) {
-            var newTheme = changes["ui-inspector-theme"].newValue;
-            if (sidebarEl) {
-                if (newTheme === "dark") {
-                    sidebarEl.setAttribute("data-theme", "dark");
-                } else {
-                    sidebarEl.removeAttribute("data-theme");
-                }
-            }
-            var modal = document.querySelector(".ui-inspector-modal");
-            if (modal) {
-                if (newTheme === "dark") {
-                    modal.setAttribute("data-theme", "dark");
-                } else {
-                    modal.removeAttribute("data-theme");
-                }
-            }
-        }
-    });
+    /* ══════════════════════════════════════════════════════
+       Theme Sync (live updates when popup toggles theme)
+       ══════════════════════════════════════════════════════ */
 
-    // Listens for messages from the popup and responds with current state or toggles inspect mode
-    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-        if (message.type === "TOGGLE_INSPECT") {
-            if (isInspectMode) {
-                disableInspectMode();
+    chrome.storage.onChanged.addListener((changes, area) => {
+        if (area !== "local" || !changes["ui-inspector-theme"]) return;
+        const newTheme = changes["ui-inspector-theme"].newValue;
+
+        [sidebarEl, document.querySelector(".ui-inspector-modal")].forEach((el) => {
+            if (!el) return;
+            if (newTheme === "dark") {
+                el.setAttribute("data-theme", "dark");
             } else {
-                enableInspectMode();
+                el.removeAttribute("data-theme");
             }
-            sendResponse({ isInspectMode, issueCount: issueList.length, issues: issueList, isSidebarVisible });
-        } else if (message.type === "GET_STATUS") {
-            sendResponse({ isInspectMode, issueCount: issueList.length, issues: issueList, isSidebarVisible });
-        } else if (message.type === "CLEAR_ISSUES") {
-            clearIssues();
-            renderSidebarIssues();
-            sendResponse({ issueCount: 0, issues: [], isInspectMode, isSidebarVisible });
-        } else if (message.type === "GET_ALL_ISSUES") {
-            sendResponse({ issues: issueList });
-        } else if (message.type === "TOGGLE_SIDEBAR") {
-            toggleSidebar();
-            sendResponse({ isSidebarVisible });
-        } else {
-            sendResponse({ error: "Unknown message type" });
-        }
-        return true;
+        });
     });
 
-    // Initialize by loading saved issues
-    loadIssues(function () {
+    /* ══════════════════════════════════════════════════════
+       Message Handler (popup ↔ content script)
+       ══════════════════════════════════════════════════════ */
+
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        const status = () => ({
+            isInspectMode,
+            issueCount: issueList.length,
+            issues: issueList,
+            isSidebarVisible,
+        });
+
+        switch (message.type) {
+            case "TOGGLE_INSPECT":
+                isInspectMode ? disableInspectMode() : enableInspectMode();
+                sendResponse(status());
+                break;
+
+            case "GET_STATUS":
+                sendResponse(status());
+                break;
+
+            case "CLEAR_ISSUES":
+                clearIssues();
+                renderSidebarIssues();
+                sendResponse({ issueCount: 0, issues: [], isInspectMode, isSidebarVisible });
+                break;
+
+            case "GET_ALL_ISSUES":
+                sendResponse({ issues: issueList });
+                break;
+
+            case "TOGGLE_SIDEBAR":
+                toggleSidebar();
+                sendResponse({ isSidebarVisible });
+                break;
+
+            default:
+                sendResponse({ error: "Unknown message type" });
+        }
+        return true; // Keep the message channel open for async sendResponse
+    });
+
+    /* ══════════════════════════════════════════════════════
+       Initialization
+       ══════════════════════════════════════════════════════ */
+
+    loadIssues(() => {
         console.log("[UI Inspector] Content script loaded. Issues in storage:", issueList.length);
     });
 })();

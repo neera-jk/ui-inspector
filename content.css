@@ -1,10 +1,31 @@
-/* Highlight overlay shown on hovered elements during inspect mode */
+/**
+ * UI Inspector — Content Styles
+ *
+ * All styles injected into inspected pages. Every rule uses !important
+ * and is scoped under .ui-inspector-* classes to avoid conflicts with
+ * the host page's styles. Organised into sections:
+ *
+ *  1. Highlight overlay
+ *  2. Modal (tokens, layout, severity buttons, computed styles)
+ *  3. Sidebar (tokens, layout, issue cards, footer)
+ *  4. Reduced motion
+ */
+
+/* ══════════════════════════════════════════════════════
+   1. Highlight Overlay
+   ══════════════════════════════════════════════════════ */
+
+/* Red outline + tinted background shown on hovered elements during inspect mode */
 .ui-inspector-highlight {
     outline: 2px solid #ef4444 !important;
     outline-offset: 2px !important;
     background: rgba(239, 68, 68, 0.08) !important;
     transition: outline-color 0.2s ease, outline-offset 0.2s ease !important;
 }
+
+/* ══════════════════════════════════════════════════════
+   2. Issue Modal
+   ══════════════════════════════════════════════════════ */
 
 /* ── Light mode tokens ── */
 .ui-inspector-modal {
@@ -54,7 +75,7 @@
     --ui-severity-critical-text: #fca5a5;
 }
 
-/* ── Modal styles scoped under .ui-inspector-modal ── */
+/* ── Modal Layout ── */
 
 .ui-inspector-modal {
     position: fixed !important;
@@ -421,7 +442,7 @@
 }
 
 /* ══════════════════════════════════════════════════════
-   Sidebar
+   3. Sidebar Panel
    ══════════════════════════════════════════════════════ */
 
 /* ── Sidebar light tokens ── */
@@ -695,7 +716,7 @@
 }
 
 /* ══════════════════════════════════════════════════════
-   Reduced Motion
+   4. Reduced Motion
    ══════════════════════════════════════════════════════ */
 @media (prefers-reduced-motion: reduce) {
 

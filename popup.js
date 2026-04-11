@@ -1,5 +1,23 @@
-// Sends a message to the content script running in the active tab and returns the response.
-// If the content script is not yet injected, injects it and retries once.
+/**
+ * UI Inspector — Popup Script
+ *
+ * Controls the extension popup UI. Communicates with the content script
+ * via chrome.runtime messaging. Handles:
+ *  - Inspect mode toggle
+ *  - Sidebar panel toggle
+ *  - Issue clearing and JSON export
+ *  - Light/dark theme toggling
+ */
+
+/* ══════════════════════════════════════════════════════
+   Messaging
+   ══════════════════════════════════════════════════════ */
+
+/**
+ * Sends a message to the content script in the active tab.
+ * If the content script isn't injected yet, injects it and retries once.
+ * Uses frameId: 0 to target only the top frame (avoids duplicate responses from iframes).
+ */
 function sendMessageToActiveTab(message) {
     return new Promise((resolve, reject) => {
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -8,11 +26,13 @@ function sendMessageToActiveTab(message) {
                 return;
             }
             const tabId = tabs[0].id;
+
             chrome.tabs.sendMessage(tabId, message, { frameId: 0 }, (response) => {
                 if (chrome.runtime.lastError) {
                     const errMsg = chrome.runtime.lastError.message || "";
+
                     if (errMsg.includes("Could not establish connection")) {
-                        // Content script not injected — inject it now and retry
+                        // Content script not loaded — inject and retry
                         Promise.all([
                             chrome.scripting.executeScript({ target: { tabId }, files: ["html2canvas.min.js", "content.js"] }),
                             chrome.scripting.insertCSS({ target: { tabId }, files: ["content.css"] }),
@@ -38,7 +58,11 @@ function sendMessageToActiveTab(message) {
     });
 }
 
-// Updates all UI elements based on current state
+/* ══════════════════════════════════════════════════════
+   UI Helpers
+   ══════════════════════════════════════════════════════ */
+
+/** Updates the status dot, label text, and issue badge to reflect current state */
 function updateUI(isInspectMode, issueCount) {
     const dot = document.getElementById("statusDot");
     const statusText = document.getElementById("statusText");
@@ -58,7 +82,7 @@ function updateUI(isInspectMode, issueCount) {
     badge.textContent = issueCount + " issue" + (issueCount !== 1 ? "s" : "");
 }
 
-// Triggers a JSON file download with all issues
+/** Triggers a JSON file download in the browser */
 function downloadJSON(issues) {
     const blob = new Blob([JSON.stringify(issues, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -71,9 +95,13 @@ function downloadJSON(issues) {
     URL.revokeObjectURL(url);
 }
 
-// On popup load, fetch current status and set up handlers
+/* ══════════════════════════════════════════════════════
+   Initialization (runs when popup opens)
+   ══════════════════════════════════════════════════════ */
+
 document.addEventListener("DOMContentLoaded", () => {
-    // Apply saved theme to body
+
+    // ── Apply saved theme ──
     chrome.storage.local.get("ui-inspector-theme", (result) => {
         if (result["ui-inspector-theme"] === "dark") {
             document.documentElement.setAttribute("data-theme", "dark");
@@ -81,7 +109,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
-    // Theme toggle
+    // ── Theme toggle ──
     document.getElementById("themeToggle").addEventListener("click", () => {
         const isDark = document.documentElement.getAttribute("data-theme") === "dark";
         if (isDark) {
@@ -97,7 +125,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
-    // Get initial status
+    // ── Fetch initial status from content script ──
     sendMessageToActiveTab({ type: "GET_STATUS" })
         .then((response) => {
             if (response) {
@@ -112,47 +140,40 @@ document.addEventListener("DOMContentLoaded", () => {
             updateUI(false, 0);
         });
 
-    // Toggle inspect mode
+    // ── Button handlers ──
+
     document.getElementById("ctaBtn").addEventListener("click", () => {
         sendMessageToActiveTab({ type: "TOGGLE_INSPECT" })
             .then((response) => {
-                if (response) {
-                    updateUI(response.isInspectMode, response.issueCount);
-                }
+                if (response) updateUI(response.isInspectMode, response.issueCount);
             })
             .catch((err) => { console.warn("[UI Inspector] Toggle inspect failed:", err.message); });
     });
 
-    // Toggle sidebar panel
     document.getElementById("panelBtn").addEventListener("click", () => {
         sendMessageToActiveTab({ type: "TOGGLE_SIDEBAR" })
             .then((response) => {
                 if (response) {
-                    document.getElementById("panelBtn").textContent = response.isSidebarVisible ? "Hide Panel" : "Show Panel";
+                    document.getElementById("panelBtn").textContent =
+                        response.isSidebarVisible ? "Hide Panel" : "Show Panel";
                 }
             })
             .catch((err) => { console.warn("[UI Inspector] Toggle sidebar failed:", err.message); });
     });
 
-    // Clear all issues
     document.getElementById("clearBtn").addEventListener("click", () => {
         if (!confirm("Clear all issues? This cannot be undone.")) return;
         sendMessageToActiveTab({ type: "CLEAR_ISSUES" })
             .then((response) => {
-                if (response) {
-                    updateUI(response.isInspectMode, 0);
-                }
+                if (response) updateUI(response.isInspectMode, 0);
             })
             .catch((err) => { console.warn("[UI Inspector] Clear issues failed:", err.message); });
     });
 
-    // Export JSON
     document.getElementById("exportBtn").addEventListener("click", () => {
         sendMessageToActiveTab({ type: "GET_ALL_ISSUES" })
             .then((response) => {
-                if (response && response.issues) {
-                    downloadJSON(response.issues);
-                }
+                if (response && response.issues) downloadJSON(response.issues);
             })
             .catch((err) => { console.warn("[UI Inspector] Export failed:", err.message); });
     });

@@ -1,3 +1,11 @@
+/**
+ * UI Inspector — Theme Initializer
+ *
+ * Runs synchronously in <head> (before paint) to prevent a flash of
+ * unstyled content (FOUC) when dark mode is active. Reads localStorage
+ * first for instant application, then verifies against chrome.storage.local
+ * (the authoritative source) and corrects any mismatch.
+ */
 (function () {
     try {
         // Synchronous flash prevention: check localStorage first

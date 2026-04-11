@@ -1,3 +1,11 @@
+/**
+ * UI Inspector — Popup Styles
+ *
+ * Styles for the extension popup (popup.html). Uses CSS custom properties
+ * for light/dark theme support. Layout: header, status row, CTA button,
+ * action buttons.
+ */
+
 /* ── Light mode tokens ── */
 :root {
     --bg: #ffffff;
